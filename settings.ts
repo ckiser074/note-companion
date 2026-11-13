@@ -20,7 +20,7 @@ export class FileOrganizerSettings {
   localModelFileName = DEFAULT_LOCAL_MODEL_FILENAME;
   localModelUrl = DEFAULT_LOCAL_MODEL_URL;
   localCpuThreads = getDefaultCpuThreads();
-  localContextSize = 4096;
+  localContextSize = 2048;
   paraProjectsRoot = DEFAULT_PARA_ROOTS.project;
   paraAreasRoot = DEFAULT_PARA_ROOTS.area;
   paraResourcesRoot = DEFAULT_PARA_ROOTS.resource;
@@ -100,3 +100,25 @@ export class FileOrganizerSettings {
 }
 
 export const DEFAULT_SETTINGS = new FileOrganizerSettings();
+
+export function migrateLocalModelSettings(
+  settings: FileOrganizerSettings,
+  loaded: Partial<FileOrganizerSettings> | null
+): boolean {
+  const legacyFileName = "Qwen3-1.7B-Q4_K_M.gguf";
+  const legacyModelId = "unsloth/Qwen3-1.7B-GGUF";
+  const legacyModelUrl =
+    "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf";
+  const hasLegacyDefault =
+    loaded?.localModelFileName === legacyFileName ||
+    (!loaded?.localModelFileName &&
+      (loaded?.localModelId === legacyModelId ||
+        loaded?.localModelUrl === legacyModelUrl));
+
+  if (!hasLegacyDefault) return false;
+
+  settings.localModelId = DEFAULT_LOCAL_MODEL_ID;
+  settings.localModelFileName = DEFAULT_LOCAL_MODEL_FILENAME;
+  settings.localModelUrl = DEFAULT_LOCAL_MODEL_URL;
+  return true;
+}

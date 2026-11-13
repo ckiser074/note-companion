@@ -6,10 +6,10 @@ import * as http from "http";
 import type { IncomingMessage, ClientRequest } from "http";
 import type { DownloadProgress } from "./types";
 
-export const DEFAULT_LOCAL_MODEL_ID = "unsloth/Qwen3-1.7B-GGUF";
-export const DEFAULT_LOCAL_MODEL_FILENAME = "Qwen3-1.7B-Q4_K_M.gguf";
+export const DEFAULT_LOCAL_MODEL_ID = "unsloth/Qwen3-0.6B-GGUF";
+export const DEFAULT_LOCAL_MODEL_FILENAME = "Qwen3-0.6B-Q4_K_M.gguf";
 export const DEFAULT_LOCAL_MODEL_URL =
-  "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf";
+  "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf";
 
 const MAX_REDIRECTS = 6;
 
@@ -55,6 +55,33 @@ export class ModelDownloader {
 
   getModelFilePath(fileName = DEFAULT_LOCAL_MODEL_FILENAME): string {
     return path.join(this.getModelsDir(), fileName);
+  }
+
+  async listModelFiles(): Promise<string[]> {
+    const modelsDir = this.getModelsDir();
+    try {
+      const entries = await fs.promises.readdir(modelsDir, {
+        withFileTypes: true,
+      });
+      const models = await Promise.all(
+        entries
+          .filter((entry) => entry.isFile() && entry.name.endsWith(".gguf"))
+          .map(async (entry) => {
+            const info = await fs.promises.stat(
+              path.join(modelsDir, entry.name)
+            );
+            return info.size > 0 ? entry.name : null;
+          })
+      );
+      return models
+        .filter((fileName): fileName is string => fileName !== null)
+        .sort((a, b) => a.localeCompare(b));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
   }
 
   getWasmFilePath(): string {
@@ -129,7 +156,7 @@ export class ModelDownloader {
     }
 
     new Notice(
-      `Downloading ${fileName} (~1.1 GB) for offline AI. You can track progress in Settings.`,
+      `Downloading ${fileName} (~480 MB) for offline AI. You can track progress in Settings.`,
       6000
     );
 

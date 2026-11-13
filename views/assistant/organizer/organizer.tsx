@@ -3,18 +3,15 @@ import { TFile, WorkspaceLeaf, Notice, TAbstractFile } from "obsidian";
 import FileOrganizer from "../../../index";
 
 import { SectionHeader } from "../section-header";
-import { SimilarTags } from "./tags";
 import { AtomicNotes } from "./chunks";
-import { RenameSuggestion } from "./titles/box";
-import { SimilarFolderBox } from "./folders/box";
 import { RefreshButton } from "./components/refresh-button";
-import { ClassificationContainer } from "./ai-format/templates";
 import { TranscriptionButton } from "./transcript";
 import { EmptyState } from "./components/empty-state";
 import { logMessage } from "../../../someUtils";
 import { VALID_MEDIA_EXTENSIONS } from "../../../constants";
 import { logger } from "../../../services/logger";
 import { tw } from "../../../lib/utils";
+import { isTokenLimitError } from "../../../lib/token-limit-error";
 
 interface AssistantViewProps {
   plugin: FileOrganizer;
@@ -64,6 +61,10 @@ export const AssistantView: React.FC<AssistantViewProps> = ({
   const [noteContent, setNoteContent] = React.useState<string>("");
   const [refreshKey, setRefreshKey] = React.useState<number>(0);
   const [error, setError] = React.useState<string | null>(null);
+  const [organizing, setOrganizing] = React.useState(false);
+  const [organizationError, setOrganizationError] = React.useState<
+    string | null
+  >(null);
 
   // Use refs to track the active file and path for rename detection
   const activeFilePathRef = React.useRef<string | null>(null);
@@ -241,6 +242,36 @@ export const AssistantView: React.FC<AssistantViewProps> = ({
     }
   }, [activeFile, plugin.app.vault]);
 
+  const handleOrganizeNote = React.useCallback(async () => {
+    if (!activeFile || organizing) return;
+
+    setOrganizing(true);
+    setOrganizationError(null);
+    isRenamingRef.current = true;
+    try {
+      const organizedFile = await plugin.classifyAndOrganizeNote(
+        activeFile,
+        noteContent
+      );
+      const content = await plugin.app.vault.read(organizedFile);
+      activeFileRef.current = organizedFile;
+      activeFilePathRef.current = organizedFile.path;
+      setActiveFile(organizedFile);
+      setNoteContent(content);
+      setRefreshKey((prev) => prev + 1);
+    } catch (err) {
+      logger.error("[PARA Companion] Organizer action failed:", err);
+      const message = err instanceof Error ? err.message : String(err);
+      setOrganizationError(message);
+      if (isTokenLimitError(err)) {
+        onTokenLimitError?.(message);
+      }
+    } finally {
+      isRenamingRef.current = false;
+      setOrganizing(false);
+    }
+  }, [activeFile, noteContent, onTokenLimitError, organizing, plugin]);
+
 
   if (error) {
     return (
@@ -326,7 +357,7 @@ export const AssistantView: React.FC<AssistantViewProps> = ({
         </div>
         <div className={tw("px-3")}>
           <EmptyState
-            message="This file is empty. Add some content and click refresh to see AI suggestions."
+            message="This file is empty. Add content, then use Organize Note to route it with PARA."
             showRefresh={false}
             onRefresh={refreshContext}
             showDelete={true}
@@ -355,105 +386,25 @@ export const AssistantView: React.FC<AssistantViewProps> = ({
 
       {/* Content sections - consistent padding with other tabs */}
       <div className={tw("flex flex-col px-3")}>
-        {renderSection(
-          <ClassificationContainer
-            plugin={plugin}
-            file={activeFile}
-            content={noteContent}
-            refreshKey={refreshKey}
-            onTokenLimitError={onTokenLimitError}
-            onFileRename={(newFile) => { void (async () => {
-              // Set flag to prevent updateActiveFile from interfering
-              isRenamingRef.current = true;
-
-              // Update refs first
-              activeFileRef.current = newFile;
-              activeFilePathRef.current = newFile.path;
-
-              // Then update state
-              setActiveFile(newFile);
-
-              // Also update the content to ensure everything is in sync
-              try {
-                const content = await plugin.app.vault.read(newFile);
-                setNoteContent(content);
-              } catch (err) {
-                logger.error("Error reading renamed file content:", err);
-              }
-
-              // Force a refresh of all child components
-              setRefreshKey(prev => prev + 1);
-
-              // Clear the flag after a delay to allow other updates
-              window.setTimeout(() => {
-                isRenamingRef.current = false;
-                // Verify state is correct, fix if needed
-                const currentActive = plugin.app.workspace.getActiveFile();
-                if (
-                  currentActive &&
-                  currentActive.path === newFile.path &&
-                  activeFileRef.current?.path !== newFile.path
-                ) {
-                  setActiveFile(newFile);
-                  activeFileRef.current = newFile;
-                  activeFilePathRef.current = newFile.path;
-                }
-              }, 500);
-            })(); }}
-            onFormatComplete={(formattedFile) => { void (async () => {
-              try {
-                const content = await plugin.app.vault.read(formattedFile);
-                activeFileRef.current = formattedFile;
-                activeFilePathRef.current = formattedFile.path;
-                setActiveFile(formattedFile);
-                setNoteContent(content);
-                setRefreshKey(prev => prev + 1);
-              } catch (err) {
-                logger.error("Error reading file after format:", err);
-              }
-            })(); }}
-          />,
-          "Error loading classification"
-        )}
-
-        <SectionHeader text="Tags" icon="🏷️ " />
-        {renderSection(
-          <SimilarTags
-            plugin={plugin}
-            file={activeFile}
-            content={noteContent}
-            refreshKey={refreshKey}
-            onTokenLimitError={onTokenLimitError}
-          />,
-          "Error loading tags"
-        )}
-
-        {plugin.settings.enableTitleSuggestions && (
-          <>
-            <SectionHeader text="Titles" icon="💡 " />
-            {renderSection(
-              <RenameSuggestion
-                plugin={plugin}
-                file={activeFile}
-                content={noteContent}
-                refreshKey={refreshKey}
-              />,
-              "Error loading title suggestions"
-            )}
-          </>
-        )}
-
-        <SectionHeader text="Folders" icon="📁 " />
-        {renderSection(
-          <SimilarFolderBox
-            plugin={plugin}
-            file={activeFile}
-            content={noteContent}
-            refreshKey={refreshKey}
-            onTokenLimitError={onTokenLimitError}
-          />,
-          "Error loading folder suggestions"
-        )}
+        <SectionHeader text="PARA organization" icon="🗂️ " />
+        <div className="p-3 border-b border-[--background-modifier-border]">
+          <p className="text-sm text-[--text-muted] mt-0">
+            Classify, choose a folder and title, and add tags in one local AI
+            request.
+          </p>
+          <button
+            className="mod-cta px-3 py-1.5 rounded disabled:opacity-50"
+            disabled={organizing}
+            onClick={() => { void handleOrganizeNote(); }}
+          >
+            {organizing ? "Organizing..." : "Organize Note"}
+          </button>
+          {organizationError && (
+            <p className="text-sm text-[--text-error] mb-0">
+              {organizationError}
+            </p>
+          )}
+        </div>
 
         {plugin.settings.enableAtomicNotes && (
           <>

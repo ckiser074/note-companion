@@ -48,11 +48,13 @@ const reactAliases = {
 };
 
 async function buildAiWorkerFile() {
+	const workerPath = path.join(outdir, "ai-worker.js");
 	await esbuild.build({
 		entryPoints: [path.join(pluginDir, "workers/ai-worker.ts")],
 		bundle: true,
-		outfile: path.join(outdir, "ai-worker.js"),
+		outfile: workerPath,
 		platform: "browser",
+		conditions: ["browser", "worker", "default"],
 		format: "iife",
 		target: "es2022",
 		minify: prod,
@@ -60,6 +62,28 @@ async function buildAiWorkerFile() {
 		treeShaking: true,
 		tsconfig: path.join(pluginDir, "tsconfig.json"),
 	});
+
+	const workerCode = fs.readFileSync(workerPath, "utf8");
+	const nodeWorkerBootstrap =
+		'var ENVIRONMENT_IS_NODE=globalThis.process?.versions?.node&&globalThis.process?.type!="renderer";var ENVIRONMENT_IS_PTHREAD=ENVIRONMENT_IS_WORKER&&self.name?.startsWith("em-pthread");if(ENVIRONMENT_IS_NODE){var worker_threads=require("worker_threads");global.Worker=worker_threads.Worker;ENVIRONMENT_IS_WORKER=!worker_threads.isMainThread;ENVIRONMENT_IS_PTHREAD=ENVIRONMENT_IS_WORKER&&worker_threads["workerData"]=="em-pthread"}';
+	const browserWorkerBootstrap =
+		'var ENVIRONMENT_IS_NODE=false;var ENVIRONMENT_IS_PTHREAD=ENVIRONMENT_IS_WORKER&&self.name?.startsWith("em-pthread");';
+	if (!workerCode.includes(nodeWorkerBootstrap)) {
+		throw new Error(
+			"Could not locate wllama's Node worker adapter in the browser bundle."
+		);
+	}
+
+	// Electron exposes Node globals in some workers; keep Emscripten on its browser path.
+	const browserWorkerCode = workerCode
+		.replace(nodeWorkerBootstrap, browserWorkerBootstrap)
+		.replaceAll("worker_threads", "disabled_node_adapter");
+	if (browserWorkerCode.includes("worker_threads")) {
+		throw new Error(
+			"Node worker_threads code remains in the browser AI worker bundle."
+		);
+	}
+	fs.writeFileSync(workerPath, browserWorkerCode);
 }
 
 await buildAiWorkerFile();

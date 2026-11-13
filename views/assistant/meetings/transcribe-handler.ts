@@ -9,7 +9,7 @@ export interface TranscribeResult {
 }
 
 const OFFLINE_TRANSCRIPTION_DISABLED =
-  "Audio transcription is disabled in 100% offline text-only mode (Qwen3-1.7B). Use an existing transcript file (.txt) or ScreenPipe transcripts.";
+  "Audio transcription is disabled in 100% offline text-only mode (Qwen3-0.6B). Use an existing transcript file (.txt) or ScreenPipe transcripts.";
 
 export class TranscribeHandler {
   static async transcribeRecording(

@@ -2,12 +2,10 @@ import { ErrorService, ErrorSeverity } from './error-service';
 import { IdService } from './id-service';
 import { TFile } from "obsidian";
 
-const MAX_CONCURRENT_TASKS = 5;
+const MAX_CONCURRENT_TASKS = 1;
 
 export interface QueueTaskMetadata {
   hash: string;
-  /** Per-task timeout; defaults to queue option when omitted */
-  timeoutMs?: number;
 }
 
 interface QueueItem<T> {
@@ -19,7 +17,6 @@ interface QueueItem<T> {
 
 interface QueueOptions<T> {
   concurrency?: number;
-  timeout?: number;
   onProcess: (item: T, metadata?: QueueTaskMetadata) => Promise<void>;
   onComplete?: (item: T, metadata?: QueueTaskMetadata) => void;
   onError?: (error: Error, item: T, metadata?: QueueTaskMetadata) => void;
@@ -49,7 +46,6 @@ export class Queue<T> {
   constructor(options: QueueOptions<T>) {
     this.options = {
       concurrency: MAX_CONCURRENT_TASKS,
-      timeout: 30000,
       onComplete: options.onComplete || ((item: T, metadata?: QueueTaskMetadata) => {}),
       onError: options.onError || ((error: Error, item: T, metadata?: QueueTaskMetadata) => {}),
       ...options
@@ -90,15 +86,7 @@ export class Queue<T> {
     this.processing.add(hash);
 
     try {
-      const timeoutMs = item.metadata?.timeoutMs ?? this.options.timeout;
-      const timeoutPromise = new Promise((_, reject) => {
-        window.setTimeout(() => reject(new Error('Processing timeout')), timeoutMs);
-      });
-
-      await Promise.race([
-        this.options.onProcess(item.data, item.metadata),
-        timeoutPromise
-      ]);
+      await this.options.onProcess(item.data, item.metadata);
 
       this.completedItems.add(hash);
       this.items.delete(hash);

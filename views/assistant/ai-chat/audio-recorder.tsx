@@ -10,7 +10,7 @@ interface AudioRecorderProps {
 }
 
 const OFFLINE_VOICE_MSG =
-  "Voice transcription is disabled in 100% offline text-only mode (Qwen3-1.7B).";
+  "Voice transcription is disabled in 100% offline text-only mode (Qwen3-0.6B).";
 
 export const AudioRecorder: React.FC<AudioRecorderProps> = () => {
   const handleClick = (e: React.MouseEvent) => {

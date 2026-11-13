@@ -1,5 +1,5 @@
 import { TFile, Notice } from "obsidian";
-import FileOrganizer from "../index";
+import FileOrganizer, { type OrganizationSuggestion } from "../index";
 import { Queue, type QueueTaskMetadata } from "./services/queue";
 import {
   FileRecord,
@@ -26,13 +26,9 @@ import {
   safeCreate,
   safeRename,
   safeMove,
+  ensureFolderExists,
 } from "../fileUtils";
 import { getErrorMessage, getErrorStack } from "../lib/api-json";
-import {
-  decideTemplate,
-  filterTemplatesForAudio,
-  getForcedAudioTemplate,
-} from "./audio-template";
 import { restoreAudioSourceInFile } from "../lib/audio-source";
 import { shouldShowInboxNotification } from "./notification-level";
 import { resolveStudyTemplate, studyNoteLabel } from "./study-note";
@@ -42,7 +38,6 @@ import { sanitizeContent } from "../fileUtils";
 import {
   extractYouTubeVideoId,
   getYouTubeContent,
-  getOriginalContent,
   YouTubeError,
   isYoutubeTemplate,
   prepareYouTubeFormatContent,
@@ -54,26 +49,8 @@ import {
 } from "./services/youtube-service";
 
 // Move constants to the top level and ensure they're used consistently
-const MAX_CONCURRENT_TASKS = 5;
-const MAX_CONCURRENT_MEDIA_TASKS = 2;
-
-/** Text-only inbox files: classify, tag, move */
-const INBOX_QUEUE_TIMEOUT_MS = 30_000;
-/** Images/PDF: vision OCR plus full organize pipeline */
-const INBOX_MEDIA_QUEUE_TIMEOUT_MS = 3 * 60_000;
-/** Audio: transcription can run for several minutes */
-const INBOX_AUDIO_QUEUE_TIMEOUT_MS = 15 * 60_000;
-
-function getInboxQueueTimeoutMs(file: TFile): number {
-  const ext = file.extension.toLowerCase();
-  if (VALID_AUDIO_EXTENSIONS.includes(ext)) {
-    return INBOX_AUDIO_QUEUE_TIMEOUT_MS;
-  }
-  if (VALID_IMAGE_EXTENSIONS.includes(ext) || ext === "pdf") {
-    return INBOX_MEDIA_QUEUE_TIMEOUT_MS;
-  }
-  return INBOX_QUEUE_TIMEOUT_MS;
-}
+const MAX_CONCURRENT_TASKS = 1;
+const MAX_CONCURRENT_MEDIA_TASKS = 1;
 
 export interface FolderSuggestion {
   isNewFolder: boolean;
@@ -112,6 +89,7 @@ interface ProcessingContext {
   newPath?: string;
   newName?: string;
   tags?: string[];
+  organization?: OrganizationSuggestion;
   plugin: FileOrganizer;
   recordManager: RecordManager;
   idService: IdService;
@@ -225,7 +203,7 @@ export class Inbox {
       const hash = this.idService.generateFileHash(file);
       this.recordManager.startTracking(hash, file.basename);
       this.queue.add(file, {
-        metadata: { hash, timeoutMs: getInboxQueueTimeoutMs(file) },
+        metadata: { hash },
       });
     }
 
@@ -234,7 +212,7 @@ export class Inbox {
       const hash = this.idService.generateFileHash(file);
       this.recordManager.startTracking(hash, file.basename);
       this.queue.add(file, {
-        metadata: { hash, timeoutMs: getInboxQueueTimeoutMs(file) },
+        metadata: { hash },
       });
     }
 
@@ -246,7 +224,6 @@ export class Inbox {
   private initializeQueue(): void {
     this.queue = new Queue<TFile>({
       concurrency: MAX_CONCURRENT_TASKS,
-      timeout: INBOX_QUEUE_TIMEOUT_MS,
       onProcess: async (file: TFile, metadata?: QueueTaskMetadata) => {
         try {
           const isMediaFile = this.plugin.shouldCreateMarkdownContainer(file);
@@ -307,7 +284,7 @@ export class Inbox {
     if (nextFile) {
       const hash = this.idService.generateFileHash(nextFile);
       this.queue.add(nextFile, {
-        metadata: { hash, timeoutMs: getInboxQueueTimeoutMs(nextFile) },
+        metadata: { hash },
       });
     }
   }
@@ -428,9 +405,9 @@ export class Inbox {
 
       await executeStep(
         context,
-        recommendClassificationStep,
-        Action.CLASSIFY,
-        Action.ERROR_CLASSIFY
+        recommendOrganizationStep,
+        Action.ORGANIZE,
+        Action.ERROR_ORGANIZE
       );
 
       // Fetch transcript only after classification as a youtube_* template
@@ -592,19 +569,8 @@ async function recommendNameStep(
     return context;
   }
 
-  const documentType = context.classification?.documentType;
-  const useYoutubeTitle =
-    context.youtubeContent?.title &&
-    documentType &&
-    isYoutubeTemplate(documentType);
-
-  const newName = useYoutubeTitle
-    ? [{ title: context.youtubeContent.title }]
-    : await context.plugin.recommendName(
-        getOriginalContent(context.content),
-        context.containerFile.basename
-      );
-  context.newName = newName[0]?.title;
+  const newName = context.organization?.suggestedFilename;
+  context.newName = newName;
 
   // if new name is the same as the old name then don't rename
   if (!context.newName || context.newName === context.containerFile.basename) {
@@ -613,10 +579,15 @@ async function recommendNameStep(
 
   // Sanitize the new name to replace invalid characters with dashes
   const sanitizedName = sanitizeFileName(context.newName);
-  context.newName = sanitizedName;
+  context.newName = sanitizedName.trim().replace(/[. ]+$/g, "");
 
-  context.recordManager.setNewName(context.hash, context.newName);
+  if (context.newPath) {
+    return context;
+  }
+
   await safeRename(context.plugin.app, context.containerFile, context.newName);
+  context.newName = context.containerFile.basename;
+  context.recordManager.setNewName(context.hash, context.newName);
   // Update file reference after rename (TFile path is automatically updated by Obsidian)
   context.recordManager.setFile(context.hash, context.containerFile);
   return context;
@@ -641,82 +612,90 @@ async function recommendFolderStep(
     return context;
   }
 
-  // Use post-format content so folder suggestions reflect the note body (especially YouTube).
-  const folderContent = context.content;
-
-  const newPath = await context.plugin.recommendFolders(
-    folderContent,
-    context.containerFile.path
-  );
-
+  const organization = context.organization;
   assertInvariant(
-    !!newPath?.[0]?.folder,
-    "Folder recommendation must return a valid path"
+    !!organization,
+    "Combined PARA organization result must exist before moving"
   );
+  if (!organization) {
+    throw new Error("Combined PARA organization result is missing.");
+  }
 
-  context.newPath = newPath[0]?.folder;
-  await safeMove(context.plugin.app, context.containerFile, context.newPath);
-  context.recordManager.setFolder(context.hash, context.newPath);
-  // Update file reference after move (TFile path is automatically updated by Obsidian)
-  context.recordManager.setFile(context.hash, context.containerFile);
+  const targetFolder = organization.targetFolder;
+  const file = context.containerFile;
+  const moveNotice = new Notice(`Moving to ${targetFolder}...`, 0);
 
-  return context;
+  try {
+    console.debug("[PARA Companion] 2. Ensuring folder exists:", targetFolder);
+    await ensureFolderExists(context.plugin.app, targetFolder);
+
+    const targetName = context.plugin.settings.enableFileRenaming
+      ? organization.suggestedFilename
+      : file.basename;
+    console.debug("[PARA Companion] 3. Moving file to:", targetFolder);
+    const movedPath = await safeMove(
+      context.plugin.app,
+      file,
+      targetFolder,
+      targetName
+    );
+    const movedFile = context.plugin.app.vault.getAbstractFileByPath(movedPath);
+    if (!(movedFile instanceof TFile)) {
+      throw new Error(`Moved note could not be found at "${movedPath}".`);
+    }
+
+    context.containerFile = movedFile;
+    context.newPath = targetFolder;
+    context.recordManager.setFolder(context.hash, targetFolder);
+    context.recordManager.setFile(context.hash, movedFile);
+    if (context.plugin.settings.enableFileRenaming) {
+      context.newName = movedFile.basename;
+      context.recordManager.setNewName(context.hash, movedFile.basename);
+    }
+    new Notice(`Moved to ${targetFolder}`, 4000);
+    return context;
+  } catch (error) {
+    const message = getErrorMessage(error);
+    logger.error(`Failed to move note to ${targetFolder}:`, error);
+    new Notice(`Failed to move to ${targetFolder}: ${message}`, 6000);
+    throw error;
+  } finally {
+    moveNotice.hide();
+    context.plugin.app.workspace.trigger("file-organizer:processing-step", {
+      fileName: context.containerFile?.basename ?? context.inboxFile.basename,
+      action: "Move settled",
+      hash: context.hash,
+    });
+  }
 }
 
-async function recommendClassificationStep(
+async function recommendOrganizationStep(
   context: ProcessingContext
 ): Promise<ProcessingContext> {
-  // Validate required context
   const validation = validateContext(context, ["content", "containerFile"]);
   if (!validation.isValid) {
     throw new Error(
-      `Classification step validation failed: ${validation.reason}`
+      `PARA organization validation failed: ${validation.reason}`
     );
   }
-
-  const allTemplateNames = await context.plugin.getTemplateNames();
   if (!context.content || !context.containerFile) {
-    logger.info("Skipping classification: missing content or container file");
-    return context;
+    throw new Error("Content and a note file are required for PARA organization.");
   }
 
-  const isAudio = VALID_AUDIO_EXTENSIONS.includes(
-    context.inboxFile?.extension
+  const existingTags = await context.plugin.getAllVaultTags();
+  context.organization = await context.plugin.recommendOrganization(
+    context.content,
+    context.containerFile.path,
+    existingTags
   );
-  const audioTemplate = getAudioDefaultTemplate(context);
-  const decision = decideTemplate({
-    forcedTemplate: audioTemplate,
-    templateNames: allTemplateNames,
-    autoFormattingEnabled: context.plugin.settings.enableDocumentClassification,
-  });
-  let result: string | undefined;
-  if (decision.kind === "use") {
-    result = decision.template;
-    logger.info("Using audio default template", { audioTemplate });
-  } else if (decision.kind === "skip") {
-    // Only reachable via the audio default template, which is missing from the template folder
-    logger.warn(`Audio default template "${audioTemplate}" not found; leaving the note unformatted`);
-    return context;
-  } else {
-    result = await context.plugin.classifyContentV2(
-      `${getOriginalContent(context.content)}, ${context.containerFile.name}`,
-      // youtube_* templates skip without a video link, so never offer them for audio
-      isAudio ? filterTemplatesForAudio(allTemplateNames) : allTemplateNames
-    );
-  }
-  logger.info("Classification result", result);
-  if (!result) return context;
-  context.classification = {
-    documentType: result,
-    confidence: 100,
-    reasoning: "N/A",
-  };
-
-  // Set the classification in the record manager
-  context.recordManager.setClassification(context.hash, result);
-
-  // Explicitly log the completion of classification
-  context.recordManager.completeAction(context.hash, Action.CLASSIFY_DONE);
+  context.recordManager.setClassification(
+    context.hash,
+    context.organization.paraCategory
+  );
+  console.debug(
+    "[PARA Companion] 1. AI Result received:",
+    context.organization
+  );
 
   return context;
 }
@@ -1122,28 +1101,14 @@ async function formatContentStep(
 async function recommendTagsStep(
   context: ProcessingContext
 ): Promise<ProcessingContext> {
-  const documentType = context.classification?.documentType;
-  if (documentType && isYoutubeTemplate(documentType)) {
+  if (!context.containerFile || !context.organization) {
     logger.info(
-      "Skipping tag recommendation: youtube_* templates add tags during formatting"
+      "Skipping tag application: combined PARA organization result is unavailable"
     );
     return context;
   }
 
-  const existingTags = await context.plugin.getAllVaultTags();
-  if (!context.content || !context.containerFile) {
-    logger.info(
-      "Skipping tag recommendation: missing content or container file"
-    );
-    return context;
-  }
-
-  const tags = await context.plugin.recommendTags(
-    context.content,
-    context.containerFile.path,
-    existingTags
-  );
-  context.tags = tags?.map(t => t.tag);
+  context.tags = context.organization.tags;
   // for each tag, append it to the file
   if (context.tags && context.containerFile) {
     for (const tag of context.tags) {
@@ -1234,6 +1199,7 @@ async function handleError(
       await moveFileToErrorFolder(context);
       break;
     case Action.ERROR_CLASSIFY:
+    case Action.ERROR_ORGANIZE:
     case Action.ERROR_TAGGING:
       destinationFolder = context.plugin.settings.backupFolderPath;
       errorType = "AI processing error";
@@ -1301,17 +1267,6 @@ export function enqueueFiles(files: TFile[]): void {
 export function getInboxStatus(): QueueStatus {
   return Inbox.getInstance().getQueueStats();
 }
-/** Template forced for this audio file by the "audio default template" setting, if any. */
-function getAudioDefaultTemplate(context: ProcessingContext): string | null {
-  const extension = context.inboxFile?.extension;
-  return getForcedAudioTemplate({
-    isAudioFile: !!extension && VALID_AUDIO_EXTENSIONS.includes(extension),
-    // With transcription off the note is only an embed, so there is nothing to format
-    mediaExtractionSkipped: isMediaExtractionSkipped(context),
-    setting: context.plugin.settings.audioDefaultTemplate,
-  });
-}
-
 /** Study-note template for this file ("study note from recordings" setting): audio that was transcribed, or null. */
 function getStudyTemplate(context: ProcessingContext): string | null {
   const extension = context.inboxFile?.extension;
@@ -1358,11 +1313,7 @@ function shouldSkipAction(context: ProcessingContext, action: Action): boolean {
   switch (action) {
     case Action.CLASSIFY:
     case Action.FORMATTING:
-      // An audio default template formats recordings even when general auto-formatting is off
-      return (
-        !context.plugin.settings.enableDocumentClassification &&
-        !getAudioDefaultTemplate(context)
-      );
+      return true;
     case Action.RENAME:
       return !context.plugin.settings.enableFileRenaming;
     case Action.TAGGING:
@@ -1372,7 +1323,8 @@ function shouldSkipAction(context: ProcessingContext, action: Action): boolean {
     case Action.FETCH_YOUTUBE:
       return !context.plugin.settings.enableYouTubeTranscriptFetching;
     case Action.STUDY_NOTE:
-      return !getStudyTemplate(context);
+      // Study-note generation would start a second completion for this file.
+      return true;
     default:
       return false;
   }
@@ -1381,6 +1333,7 @@ function shouldSkipAction(context: ProcessingContext, action: Action): boolean {
 export function getActionDisplayName(action: Action): string {
   const actionMap: Record<string, string> = {
     [Action.EXTRACT]: "Extracting content",
+    [Action.ORGANIZE]: "Organizing PARA note",
     [Action.CLASSIFY]: "Classifying document",
     [Action.MOVING]: "Finding destination folder",
     [Action.RENAME]: "Generating title",
@@ -1399,6 +1352,7 @@ function formatErrorMessage(
     [Action.ERROR_MOVING]: "Failed to move file",
     [Action.ERROR_MOVING_ATTACHMENT]: "Failed to move attachment",
     [Action.ERROR_CLASSIFY]: "Failed to classify document",
+    [Action.ERROR_ORGANIZE]: "Failed to organize note",
     [Action.ERROR_TAGGING]: "Failed to generate tags",
     [Action.ERROR_FETCH_YOUTUBE]: "Failed to fetch YouTube transcript",
     [Action.ERROR_EXTRACT]: "Failed to extract content",
@@ -1431,10 +1385,9 @@ function calculateProgress(record: FileRecord): number {
     Action.CONTAINER,
     Action.MOVING_ATTACHMENT,
     Action.EXTRACT,
-    Action.CLASSIFY,
+    Action.ORGANIZE,
     Action.MOVING,
     Action.RENAME,
-    Action.FORMATTING,
     Action.APPEND,
     Action.TAGGING,
     Action.COMPLETED,
@@ -1467,6 +1420,7 @@ async function executeStep(
     const notifLevel = context.plugin.settings.inboxNotificationLevel;
     const isKeyProgressAction = [
       Action.EXTRACT,
+      Action.ORGANIZE,
       Action.CLASSIFY,
       Action.MOVING,
       Action.RENAME,

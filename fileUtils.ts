@@ -2,6 +2,7 @@ import { App, TFolder, TFile, normalizePath, parseYaml } from "obsidian";
 import { FileOrganizerSettings } from "./settings";
 import { logger } from "./services/logger";
 import { normalizeVaultPath } from "./lib/para";
+import { sanitizeFileName } from "./someUtils";
 
 // Default template names that come with the plugin
 export const DEFAULT_TEMPLATE_NAMES = [
@@ -529,15 +530,45 @@ Important Notes:
 }
 
 export async function ensureFolderExists(app: App, folderPath: string) {
-  const normalizedPath = normalizeVaultPath(folderPath);
-  if (!normalizedPath || (await app.vault.adapter.exists(normalizedPath))) return;
+  const normalizedPath = normalizePath(normalizeVaultPath(folderPath)).replace(
+    /^\/+|\/+$/g,
+    ""
+  );
+  if (!normalizedPath) return;
+
+  const existing = app.vault.getAbstractFileByPath(normalizedPath);
+  if (existing instanceof TFolder) return;
+  if (existing) {
+    throw new Error(
+      `Cannot create folder "${normalizedPath}": a file already exists at that path.`
+    );
+  }
+  if (await app.vault.adapter.exists(normalizedPath)) {
+    throw new Error(
+      `Cannot create folder "${normalizedPath}": the path already exists.`
+    );
+  }
+
   const lastSeparator = normalizedPath.lastIndexOf("/");
   const parentPath =
     lastSeparator >= 0 ? normalizedPath.slice(0, lastSeparator) : "";
   if (parentPath) {
     await ensureFolderExists(app, parentPath);
   }
-  await app.vault.createFolder(normalizedPath);
+
+  try {
+    await app.vault.createFolder(normalizedPath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const folderAfterError = app.vault.getAbstractFileByPath(normalizedPath);
+    if (
+      folderAfterError instanceof TFolder &&
+      /already exists|folder exists/i.test(message)
+    ) {
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function checkAndCreateFolders(
@@ -801,9 +832,11 @@ export async function safeRename(
 ): Promise<void> {
   const parentPath = file.parent?.path ?? "";
   const extension = file.extension;
-  const desiredPath = `${parentPath}/${newName}.${extension}`;
-
-  const availablePath = await getAvailablePath(app, desiredPath);
+  const availablePath = await getCollisionSafePath(
+    app,
+    buildFilePath(parentPath, newName, extension),
+    file.path
+  );
   await app.fileManager.renameFile(file, availablePath);
 }
 
@@ -822,14 +855,78 @@ export async function safeCopy(
 export async function safeMove(
   app: App,
   file: TFile,
-  destinationPath: string
+  destinationPath: string,
+  newFileName = file.basename
 ): Promise<string> {
-  await ensureFolderExists(app, destinationPath);
+  const normalizedFolder = normalizePath(destinationPath).replace(
+    /^\/+|\/+$/g,
+    ""
+  );
+  await ensureFolderExists(app, normalizedFolder);
 
-  const desiredPath = `${destinationPath}/${file.name}`;
-  const availablePath = await getAvailablePath(app, desiredPath);
-  await app.fileManager.renameFile(file, availablePath);
+  const desiredPath = buildFilePath(
+    normalizedFolder,
+    newFileName,
+    file.extension
+  );
+  const availablePath = await getCollisionSafePath(app, desiredPath, file.path);
+  if (normalizePath(file.path) !== availablePath) {
+    await app.fileManager.renameFile(file, availablePath);
+  }
   return availablePath;
+}
+
+function buildFilePath(
+  folderPath: string,
+  newFileName: string,
+  extension: string
+): string {
+  let baseName = sanitizeFileName(newFileName).trim().replace(/[. ]+$/g, "");
+  if (
+    extension &&
+    baseName.toLowerCase().endsWith(`.${extension.toLowerCase()}`)
+  ) {
+    baseName = baseName.slice(0, -(extension.length + 1));
+  }
+  if (!baseName) {
+    throw new Error("A file name is required to move or rename a note.");
+  }
+
+  return normalizePath(
+    `${folderPath ? `${folderPath}/` : ""}${baseName}${
+      extension ? `.${extension}` : ""
+    }`
+  );
+}
+
+async function getCollisionSafePath(
+  app: App,
+  desiredPath: string,
+  sourcePath?: string
+): Promise<string> {
+  const normalizedPath = normalizePath(desiredPath);
+  if (sourcePath && normalizePath(sourcePath) === normalizedPath) {
+    return normalizedPath;
+  }
+  if (!(await app.vault.adapter.exists(normalizedPath))) {
+    return normalizedPath;
+  }
+
+  const extensionIndex = normalizedPath.lastIndexOf(".");
+  const hasExtension = extensionIndex > normalizedPath.lastIndexOf("/");
+  const basePath = hasExtension
+    ? normalizedPath.slice(0, extensionIndex)
+    : normalizedPath;
+  const extension = hasExtension ? normalizedPath.slice(extensionIndex) : "";
+
+  for (let suffix = 1; suffix <= 1000; suffix++) {
+    const candidate = `${basePath}-${suffix}${extension}`;
+    if (!(await app.vault.adapter.exists(candidate))) {
+      return candidate;
+    }
+  }
+
+  throw new Error(`Could not find an available file name for "${desiredPath}".`);
 }
 /**
  * Sanitizes content to ensure it's valid for Obsidian

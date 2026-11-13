@@ -44,7 +44,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = () => {
     <div className="flex items-center gap-2 text-xs text-[--text-muted]">
       <span className="inline-flex items-center gap-1.5" title={aiState.statusMessage}>
         <span className={`w-2 h-2 rounded-full ${dotClass}`} />
-        <span>Qwen3-1.7B (Local CPU)</span>
+        <span>Qwen3-0.6B (Local CPU)</span>
         <span className="opacity-75">· {statusText}</span>
       </span>
       {aiState.status !== "ready" && !isBusy && (

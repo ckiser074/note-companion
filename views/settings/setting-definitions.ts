@@ -80,7 +80,7 @@ export function getParaCompanionSettingDefinitions(
           items: [
             {
               name: "Local AI Model",
-              desc: "Manage Qwen3-1.7B GGUF weights and offline CPU inference.",
+              desc: "Manage Qwen3-0.6B GGUF weights and offline CPU inference.",
               aliases: ["model", "wllama", "download", "local ai"],
               render: (setting) => renderLocalAIStatusRow(plugin, setting),
             },
@@ -98,15 +98,15 @@ export function getParaCompanionSettingDefinitions(
             },
             {
               name: "Context size (num_ctx)",
-              desc: "Context window tokens for local inference (default 4096). Reload model after changing.",
+              desc: "Context window tokens for local inference (default 2048). Reload model after changing.",
               aliases: ["context", "num_ctx"],
               control: {
                 type: "dropdown",
                 key: "localContextSize",
-                defaultValue: "4096",
+                defaultValue: "2048",
                 options: {
-                  "2048": "2048",
-                  "4096": "4096 (default)",
+                  "2048": "2048 (default)",
+                  "4096": "4096",
                   "8192": "8192",
                   "16384": "16384",
                 },

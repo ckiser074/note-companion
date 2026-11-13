@@ -150,9 +150,9 @@ export function OnboardingWizard({ plugin, onComplete }: OnboardingWizardProps) 
               Initialize Local AI Engine
             </div>
             <p className={tw("m-0 text-sm")}>
-              PARA Companion uses <strong>Qwen3-1.7B (Q4_K_M GGUF)</strong>{" "}
+              PARA Companion uses <strong>Qwen3-0.6B (Q4_K_M GGUF)</strong>{" "}
               inside a dedicated WebAssembly CPU worker. On first setup it
-              downloads ~1.1 GB into your plugin folder so everything runs
+              downloads ~480 MB into your plugin folder so everything runs
               completely offline afterward.
             </p>
 
@@ -238,7 +238,7 @@ export function OnboardingWizard({ plugin, onComplete }: OnboardingWizardProps) 
                   ? "Initializing..."
                   : aiState.modelExists
                   ? "Load Local AI"
-                  : "Initialize Local AI (~1.1 GB)"}
+                  : "Initialize Local AI (~480 MB)"}
               </button>
             )}
 

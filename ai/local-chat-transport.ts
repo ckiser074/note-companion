@@ -137,7 +137,7 @@ TOOL CALLING RULES:
 
   const result: ChatMLMessage[] = [{ role: "system", content: systemPrompt }];
 
-  // Keep most recent turns so small CPU context (4096 tokens) stays responsive
+  // Keep recent turns so the small local CPU context stays responsive.
   const recentMessages = messages.slice(-12);
 
   for (const msg of recentMessages) {
@@ -202,7 +202,7 @@ export class LocalChatTransport implements ChatTransport<UIMessage> {
       newUnifiedContext?: string;
     };
 
-    const maxCtx = this.plugin.settings.localContextSize || 4096;
+    const maxCtx = this.plugin.settings.localContextSize || 2048;
     const contextBudget = Math.max(2000, Math.floor(maxCtx * 2.2));
     const chatMessages = buildLocalChatMessages(
       options.messages,

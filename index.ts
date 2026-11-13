@@ -17,7 +17,7 @@ import {
   arrayBufferToBase64,
   LinkCache,
 } from "obsidian";
-import { logMessage, sanitizeTag } from "./someUtils";
+import { logMessage, sanitizeFileName, sanitizeTag } from "./someUtils";
 import { FileOrganizerSettingTab } from "./views/settings/view";
 import {
   AssistantViewWrapper,
@@ -29,7 +29,11 @@ import {
 } from "./views/assistant/dashboard/view";
 import { compressImageForVision, isWebP } from "./lib/compress-image";
 
-import { FileOrganizerSettings, DEFAULT_SETTINGS } from "./settings";
+import {
+  FileOrganizerSettings,
+  DEFAULT_SETTINGS,
+  migrateLocalModelSettings,
+} from "./settings";
 
 import { extractSelectionToNewNote } from "./commands/extract-selection-to-note";
 import { registerEventHandlers } from "./handlers/eventHandlers";
@@ -44,6 +48,7 @@ import {
   checkAndCreateTemplates,
   restoreDefaultTemplates,
   DEFAULT_TEMPLATE_NAMES,
+  safeMove,
 } from "./fileUtils";
 
 import {
@@ -79,7 +84,12 @@ import {
   buildFoldersMessages,
   buildFormatMessages,
   buildNameMessages,
+  buildOrganizationMessages,
   buildTagsMessages,
+  fitChatMLMessagesToEstimatedTokenBudget,
+  parsePrefilledOrganizationOutput,
+  PARA_ORGANIZATION_ASSISTANT_PREFILL,
+  QWEN_STOP_TOKENS,
 } from "./ai/chatml";
 import {
   getParaCategoryForPath,
@@ -106,6 +116,13 @@ export interface FolderSuggestion {
   paraCategory?: ParaCategory;
 }
 
+export interface OrganizationSuggestion {
+  paraCategory: ParaCategory;
+  targetFolder: string;
+  suggestedFilename: string;
+  tags: string[];
+}
+
 type ConceptChunk = { name: string; chunk: string };
 type ConceptsResponse = { concepts: ConceptChunk[] };
 type ClassifyResponse = { documentType?: string };
@@ -122,6 +139,42 @@ type TagsResponse = {
 };
 type TitleSuggestion = { score: number; title: string; reason: string };
 type TitlesResponse = { titles: TitleSuggestion[] };
+type OrganizationResponse = {
+  paraCategory?: string;
+  targetFolder?: string;
+  suggestedFilename?: string;
+  tags?: unknown;
+};
+
+const PARA_CATEGORY_FROM_MODEL: Record<string, ParaCategory> = {
+  projects: "project",
+  project: "project",
+  areas: "area",
+  area: "area",
+  resources: "resource",
+  resource: "resource",
+  archives: "archive",
+  archive: "archive",
+};
+
+function normalizeParaFolderPath(folder: string, root: string): string {
+  const normalizedRoot = normalizePath(root).replace(/^\/+|\/+$/g, "");
+  const normalizedFolder = normalizePath(folder)
+    .replace(/^\/+|\/+$/g, "")
+    .split("/")
+    .map((part) => sanitizeFileName(part).trim())
+    .filter((part) => part && part !== "." && part !== "..")
+    .join("/");
+  const safeFolder = normalizePath(normalizedFolder).replace(
+    /^\/+|\/+$/g,
+    ""
+  );
+
+  return safeFolder === normalizedRoot ||
+    safeFolder.startsWith(`${normalizedRoot}/`)
+    ? safeFolder
+    : normalizedRoot;
+}
 
 type PdfTextContent = { items: unknown[] };
 type PdfPage = {
@@ -175,6 +228,10 @@ export default class FileOrganizer extends Plugin {
       | Partial<FileOrganizerSettings>
       | null;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
+    const modelSettingsMigrated = migrateLocalModelSettings(
+      this.settings,
+      loaded
+    );
 
     const migratedLevel = migrateInboxNotificationLevel(loaded);
     if (migratedLevel) {
@@ -187,7 +244,7 @@ export default class FileOrganizer extends Plugin {
       this.settings.useInboxMigrated = useInboxMigration.useInboxMigrated;
     }
 
-    if (migrateImageOcrSettings(this.settings)) {
+    if (migrateImageOcrSettings(this.settings) || modelSettingsMigrated) {
       await this.saveSettings();
     }
   }
@@ -625,7 +682,7 @@ export default class FileOrganizer extends Plugin {
     _file: TFile
   ): Promise<AsyncIterableIterator<string>> {
     const msg =
-      "Audio transcription is disabled in 100% offline text-only mode (Qwen3-1.7B).";
+      "Audio transcription is disabled in 100% offline text-only mode (Qwen3-0.6B).";
     new Notice(msg, 5000);
     throw new Error(msg);
   }
@@ -638,7 +695,7 @@ export default class FileOrganizer extends Plugin {
     if (!classifications.length) {
       return "";
     }
-    const cutoff = this.settings.contentCutoffChars;
+    const cutoff = Math.min(this.settings.contentCutoffChars, 1500);
     const trimmedContent = content.slice(0, cutoff);
 
     try {
@@ -651,6 +708,212 @@ export default class FileOrganizer extends Plugin {
     } catch (error) {
       logger.error("Error classifying content with local AI:", error);
       throw error;
+    }
+  }
+
+  async recommendOrganization(
+    content: string,
+    filePath: string,
+    existingTags: string[],
+    options?: { signal?: AbortSignal }
+  ): Promise<OrganizationSuggestion> {
+    const roots = this.getParaRoots();
+    const currentCategory = getParaCategoryForPath(filePath, roots);
+    const paraRoots = Object.values(roots).map(normalizeVaultPath);
+    const existingFolders = [
+      ...paraRoots,
+      ...this.getAllUserFolders().filter((folder) =>
+        paraRoots.some((root) => folder.startsWith(`${root}/`))
+      ),
+    ];
+    const folders = prioritizeFoldersForAI(
+      [...new Set(existingFolders)],
+      filePath,
+      30
+    );
+    const noteName =
+      filePath.split("/").pop()?.replace(/\.[^.]+$/, "") ?? filePath;
+
+    try {
+      const raw = await this.localAI.generateText(
+        fitChatMLMessagesToEstimatedTokenBudget(
+          buildOrganizationMessages(
+            content.slice(0, 800),
+            noteName,
+            folders,
+            capTagsForAI(existingTags),
+            roots,
+            currentCategory
+          ),
+          350,
+          PARA_ORGANIZATION_ASSISTANT_PREFILL
+        ),
+        {
+          temperature: 0,
+          topK: 1,
+          maxTokens: 180,
+          stop: QWEN_STOP_TOKENS,
+          assistantPrefill: PARA_ORGANIZATION_ASSISTANT_PREFILL,
+          signal: options?.signal,
+        }
+      );
+      let response: OrganizationResponse;
+      let paraCategory: ParaCategory;
+      let suggestedFilename: string;
+      try {
+        response = parsePrefilledOrganizationOutput<OrganizationResponse>(raw);
+        const modelCategory = response.paraCategory?.trim().toLowerCase() ?? "";
+        const parsedCategory = PARA_CATEGORY_FROM_MODEL[modelCategory];
+        if (!parsedCategory) {
+          throw new Error(
+            `The local AI returned an invalid PARA category: "${modelCategory}".`
+          );
+        }
+        if (
+          typeof response.targetFolder !== "string" ||
+          typeof response.suggestedFilename !== "string" ||
+          !Array.isArray(response.tags) ||
+          !response.tags.every((tag) => typeof tag === "string")
+        ) {
+          throw new Error("The local AI returned an incomplete organization result.");
+        }
+
+        suggestedFilename = sanitizeFileName(
+          response.suggestedFilename
+        ).trim().replace(/[. ]+$/g, "");
+        if (!suggestedFilename) {
+          throw new Error("The local AI returned an empty suggested filename.");
+        }
+        paraCategory = parsedCategory;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn("[PARA Companion] Raw model output:", raw);
+        logger.warn(
+          "[PARA Companion] Using the Resources fallback for model output:",
+          message
+        );
+        new Notice(
+          `PARA Companion: Could not parse the local AI response. Using Resources (${roots.resource}).`,
+          7000
+        );
+        return {
+          paraCategory: "resource",
+          targetFolder: normalizeParaFolderPath(
+            roots.resource,
+            roots.resource
+          ),
+          suggestedFilename:
+            sanitizeFileName(noteName).trim().replace(/[. ]+$/g, "") ||
+            "Untitled",
+          tags: ["para/resource"],
+        };
+      }
+
+      const paraStatusTag = `#${getParaStatusTag(paraCategory)}`;
+      const tags = [
+        paraStatusTag,
+        ...new Set(
+          response.tags
+            .map((tag) => normalizeVaultTag(tag))
+            .filter((tag) => tag && !tag.startsWith("para/"))
+            .slice(0, 4)
+            .map((tag) => `#${tag}`)
+        ),
+      ];
+
+      return {
+        paraCategory,
+        targetFolder: normalizeParaFolderPath(
+          response.targetFolder,
+          roots[paraCategory]
+        ),
+        suggestedFilename,
+        tags,
+      };
+    } catch (error) {
+      logger.error("Error generating combined PARA organization result:", error);
+      throw error;
+    }
+  }
+
+  async classifyAndOrganizeNote(
+    file: TFile,
+    content?: string
+  ): Promise<TFile> {
+    const progressNotice = new Notice(
+      `PARA Companion: Organizing ${file.basename}...`,
+      0
+    );
+
+    try {
+      if (file.extension.toLowerCase() !== "md") {
+        throw new Error("PARA organization supports Markdown notes only.");
+      }
+      const noteContent = content ?? (await this.app.vault.read(file));
+      if (!noteContent.trim()) {
+        throw new Error("Add some content before organizing this note.");
+      }
+      const existingTags = await this.getAllVaultTags();
+      const organization = await this.recommendOrganization(
+        noteContent,
+        file.path,
+        existingTags
+      );
+      console.debug(
+        "[PARA Companion] 1. AI Result received:",
+        organization
+      );
+
+      const targetFolder = normalizePath(organization.targetFolder).replace(
+        /^\/+|\/+$/g,
+        ""
+      );
+      const existingFolder =
+        this.app.vault.getAbstractFileByPath(targetFolder);
+      console.debug(
+        "[PARA Companion] 2. Ensuring folder exists:",
+        targetFolder
+      );
+      if (!existingFolder) {
+        if (!this.settings.autoCreateParaFolders) {
+          throw new Error(
+            `PARA folder "${targetFolder}" does not exist and automatic folder creation is disabled.`
+          );
+        }
+        await ensureFolderExists(this.app, targetFolder);
+      } else if (!(existingFolder instanceof TFolder)) {
+        throw new Error(
+          `Cannot organize into "${targetFolder}": a file already exists at that path.`
+        );
+      }
+
+      const targetName = this.settings.enableFileRenaming
+        ? organization.suggestedFilename
+        : file.basename;
+      console.debug(
+        "[PARA Companion] 3. Moving file to:",
+        targetFolder
+      );
+      let organizedFile = await this.moveFile(file, targetName, targetFolder);
+      for (const tag of organization.tags) {
+        await this.appendTag(organizedFile, tag);
+      }
+      const refreshedFile = this.app.vault.getAbstractFileByPath(
+        organizedFile.path
+      );
+      if (refreshedFile instanceof TFile) {
+        organizedFile = refreshedFile;
+      }
+
+      new Notice(`Moved to ${targetFolder}`, 4000);
+      return organizedFile;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error("[PARA Companion] Note organization failed:", error);
+      new Notice(`PARA Companion: Could not organize note. ${message}`, 7000);
+      throw error;
+    } finally {
+      progressNotice.hide();
     }
   }
 
@@ -731,23 +994,15 @@ export default class FileOrganizer extends Plugin {
     humanReadableFileName: string,
     destinationFolder = ""
   ): Promise<TFile> {
-    const fileExtension = file.extension;
-    let targetPath = `${destinationFolder}/${humanReadableFileName}.${fileExtension}`;
-    const normalizedTargetPath = normalizePath(targetPath);
-
-    if (await this.app.vault.adapter.exists(normalizedTargetPath)) {
-      const timestamp = Date.now();
-      const uniqueFileName = `${humanReadableFileName}_${timestamp}`;
-      targetPath = `${destinationFolder}/${uniqueFileName}.${fileExtension}`;
-    }
-
-    const normalizedFinalPath = normalizePath(targetPath);
-    await ensureFolderExists(this.app, destinationFolder);
-    await this.app.fileManager.renameFile(file, normalizedFinalPath);
-
-    const movedFile = this.app.vault.getAbstractFileByPath(normalizedFinalPath);
+    const movedPath = await safeMove(
+      this.app,
+      file,
+      destinationFolder,
+      humanReadableFileName
+    );
+    const movedFile = this.app.vault.getAbstractFileByPath(movedPath);
     if (!(movedFile instanceof TFile)) {
-      throw new Error(`Failed to move file to ${normalizedFinalPath}`);
+      throw new Error(`Failed to move file to ${movedPath}`);
     }
     return movedFile;
   }
@@ -832,7 +1087,7 @@ export default class FileOrganizer extends Plugin {
 
   async generateImageAnnotation(_file: TFile): Promise<string> {
     const msg =
-      "Image OCR is disabled in 100% offline text-only mode (Qwen3-1.7B).";
+      "Image OCR is disabled in 100% offline text-only mode (Qwen3-0.6B).";
     new Notice(msg, 5000);
     throw new Error(msg);
   }
@@ -913,7 +1168,7 @@ export default class FileOrganizer extends Plugin {
   ): Promise<
     Array<{ score: number; tag: string; reason: string; isNew: boolean }>
   > {
-    const cutoff = this.settings.contentCutoffChars;
+    const cutoff = Math.min(this.settings.contentCutoffChars, 1500);
     const currentCategory = getParaCategoryForPath(
       filePath,
       this.getParaRoots()
@@ -944,7 +1199,7 @@ export default class FileOrganizer extends Plugin {
           3,
           currentCategory
         ),
-        { temperature: 0.1, maxTokens: 512, signal: options?.signal }
+        { temperature: 0.1, maxTokens: 256, signal: options?.signal }
       );
 
       const paraCategory =
@@ -1012,7 +1267,7 @@ export default class FileOrganizer extends Plugin {
     options?: { forceRefresh?: boolean; signal?: AbortSignal }
   ): Promise<FolderSuggestion[]> {
     const customInstructions = this.settings.customFolderInstructions;
-    const cutoff = this.settings.contentCutoffChars;
+    const cutoff = Math.min(this.settings.contentCutoffChars, 1500);
     const roots = this.getParaRoots();
     const cacheKey = `${buildSuggestionCacheKey(
       fileName,
@@ -1038,7 +1293,8 @@ export default class FileOrganizer extends Plugin {
     ];
     const folders = prioritizeFoldersForAI(
       [...new Set(paraFolders)],
-      fileName
+      fileName,
+      30
     );
     const existingFolders = new Set(
       this.app.vault.getAllFolders().map((folder) => folder.path)
@@ -1054,7 +1310,7 @@ export default class FileOrganizer extends Plugin {
           3,
           roots
         ),
-        { temperature: 0.1, maxTokens: 512, signal: options?.signal }
+        { temperature: 0.1, maxTokens: 256, signal: options?.signal }
       );
 
       const rawFolders = Array.isArray(response.folders)
@@ -1207,6 +1463,23 @@ export default class FileOrganizer extends Plugin {
       callback: async () => {
         const view = await this.ensureAssistantView();
         view?.activateTab("organizer");
+      },
+    });
+
+    this.addCommand({
+      id: "organize-active-note-para",
+      name: "Organize active note with PARA",
+      callback: async () => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file) {
+          new Notice("Open a note before organizing it with PARA.", 4000);
+          return;
+        }
+        try {
+          await this.classifyAndOrganizeNote(file);
+        } catch (error) {
+          logger.error("[PARA Companion] PARA command failed:", error);
+        }
       },
     });
 

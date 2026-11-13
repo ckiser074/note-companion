@@ -149,7 +149,7 @@ export const CustomizationTab: React.FC<CustomizationTabProps> = ({
                   Image OCR &amp; Audio Transcription (Disabled)
                 </div>
                 <div className="text-sm text-[--text-muted]">
-                  Unavailable in 100% offline text-only mode (Qwen3-1.7B).
+                  Unavailable in 100% offline text-only mode (Qwen3-0.6B).
                 </div>
               </div>
             </div>

@@ -4,6 +4,7 @@ import * as path from "path";
 import type FileOrganizer from "../index";
 import {
   ModelDownloader,
+  DEFAULT_LOCAL_MODEL_ID,
   DEFAULT_LOCAL_MODEL_FILENAME,
   DEFAULT_LOCAL_MODEL_URL,
 } from "./model-downloader";
@@ -30,8 +31,11 @@ interface PendingRequest {
   onToken?: (delta: string, cleanFullText: string) => void;
   rawText: string;
   emittedCleanLength: number;
+  tokenCount: number;
+  startedAt: number;
   signal?: AbortSignal;
   abortHandler?: () => void;
+  progressNotice?: Notice;
 }
 
 export class LocalAIService {
@@ -90,6 +94,36 @@ export class LocalAIService {
     }
   }
 
+  listAvailableModels(): Promise<string[]> {
+    return this.downloader.listModelFiles();
+  }
+
+  async selectModel(fileName: string): Promise<void> {
+    if (
+      path.basename(fileName) !== fileName ||
+      !fileName.toLowerCase().endsWith(".gguf")
+    ) {
+      throw new Error("Select a GGUF model from the plugin models folder.");
+    }
+
+    const availableModels = await this.downloader.listModelFiles();
+    if (!availableModels.includes(fileName)) {
+      throw new Error(`The local model "${fileName}" is not available.`);
+    }
+
+    await this.unload();
+    this.plugin.settings.localModelFileName = fileName;
+    this.plugin.settings.localModelId =
+      fileName === DEFAULT_LOCAL_MODEL_FILENAME
+        ? DEFAULT_LOCAL_MODEL_ID
+        : fileName;
+    if (fileName === DEFAULT_LOCAL_MODEL_FILENAME) {
+      this.plugin.settings.localModelUrl = DEFAULT_LOCAL_MODEL_URL;
+    }
+    await this.plugin.saveSettings();
+    this.refreshFileStatus();
+  }
+
   isReady(): boolean {
     return localAIStore.getState().status === "ready" && this.worker !== null;
   }
@@ -121,6 +155,11 @@ export class LocalAIService {
       let info = this.downloader.inspectModelFile(fileName);
 
       if (!info.exists) {
+        if (fileName !== DEFAULT_LOCAL_MODEL_FILENAME) {
+          throw new Error(
+            `Selected model "${fileName}" is missing. Choose the default model to download it automatically.`
+          );
+        }
         if (!autoDownload) {
           throw new Error(
             `Local model "${fileName}" is missing. Open Settings → General → Local AI to initialize.`
@@ -221,14 +260,16 @@ export class LocalAIService {
         },
       });
 
-      const nCtx = Math.max(1024, this.plugin.settings.localContextSize || 4096);
-      const nThreads = Math.max(1, this.plugin.settings.localCpuThreads || 4);
+      const nCtx = Math.max(1024, this.plugin.settings.localContextSize || 2048);
+      const nThreads = window.crossOriginIsolated
+        ? Math.max(1, this.plugin.settings.localCpuThreads || 4)
+        : 1;
 
       await this.sendLoadCommand(nCtx, nThreads);
 
       updateLocalAIState({
         status: "ready",
-        statusMessage: `Ready (Qwen3-1.7B, CPU ${nThreads}T, ${nCtx} ctx)`,
+        statusMessage: `Ready (${fileName}, CPU ${nThreads}T, ${nCtx} ctx)`,
         loadProgress: null,
         downloadProgress: null,
         error: null,
@@ -371,12 +412,34 @@ export class LocalAIService {
       case "token": {
         const req = this.pending.get(msg.requestId);
         if (!req) break;
-        req.rawText += msg.delta;
+        req.rawText += msg.text;
+        req.tokenCount = msg.count;
         const clean = stripThinkingBlocks(req.rawText);
         if (clean.length > req.emittedCleanLength) {
           const deltaClean = clean.slice(req.emittedCleanLength);
           req.emittedCleanLength = clean.length;
           req.onToken?.(deltaClean, clean);
+        }
+        const elapsedSeconds = Math.max(
+          0.001,
+          (Date.now() - req.startedAt) / 1000
+        );
+        const tokensPerSecond = req.tokenCount / elapsedSeconds;
+        const message = `PARA Companion: Thinking... (${req.tokenCount} tokens, ${tokensPerSecond.toFixed(1)} tok/s)`;
+        if (req.progressNotice) {
+          req.progressNotice.setMessage(message);
+        } else {
+          req.progressNotice = new Notice(message, 0);
+        }
+        break;
+      }
+      case "progress": {
+        const req = this.pending.get(msg.requestId);
+        if (!req) break;
+        if (req.progressNotice) {
+          req.progressNotice.setMessage(msg.message);
+        } else {
+          req.progressNotice = new Notice(msg.message, 0);
         }
         break;
       }
@@ -420,6 +483,7 @@ export class LocalAIService {
     if (req.signal && req.abortHandler) {
       req.signal.removeEventListener("abort", req.abortHandler);
     }
+    req.progressNotice?.hide();
   }
 
   private rejectAllPending(err: Error): void {
@@ -463,15 +527,12 @@ export class LocalAIService {
     if (this.worker) {
       const requestId = `unload_${++this.requestCounter}`;
       try {
-        await Promise.race([
-          new Promise<void>((resolve, reject) => {
-            this.loadResolvers.set(requestId, { resolve, reject });
-            this.postToWorker({ type: "unload", requestId });
-          }),
-          new Promise<void>((resolve) => setTimeout(resolve, 1500)),
-        ]);
-      } catch {
-        // ignore unload errors
+        await new Promise<void>((resolve, reject) => {
+          this.loadResolvers.set(requestId, { resolve, reject });
+          this.postToWorker({ type: "unload", requestId });
+        });
+      } catch (error) {
+        logger.warn("[LocalAI] Worker unload failed:", error);
       }
       this.worker.terminate();
       this.worker = null;
@@ -570,7 +631,8 @@ export class LocalAIService {
 
     const prompt = formatQwenChatML(
       messages,
-      options.suppressThinking ?? true
+      options.suppressThinking ?? true,
+      options.assistantPrefill
     );
     const requestId = `gen_${++this.requestCounter}`;
 
@@ -581,6 +643,8 @@ export class LocalAIService {
         onToken,
         rawText: "",
         emittedCleanLength: 0,
+        tokenCount: 0,
+        startedAt: Date.now(),
         signal: options.signal,
       };
 
@@ -602,6 +666,7 @@ export class LocalAIService {
         prompt,
         maxTokens: options.maxTokens ?? 1024,
         temperature: options.temperature ?? 0.1,
+        topK: options.topK ?? 40,
         topP: options.topP ?? 0.9,
         stop: options.stop ?? QWEN_STOP_TOKENS,
       });

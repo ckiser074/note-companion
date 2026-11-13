@@ -1378,7 +1378,10 @@ export const ChatComponent: React.FC<ChatComponentProps> = ({
     }
   }, [isChatTabActive]);
 
-  const maxContextSize = Math.max(2048, (plugin.settings.localContextSize || 4096) * 3);
+  const maxContextSize = Math.max(
+    2048,
+    (plugin.settings.localContextSize || 2048) * 3
+  );
 
   const handleTranscriptionComplete = (text: string) => {
     setInput(text);

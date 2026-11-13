@@ -10,10 +10,10 @@ import {
 } from "../../../ai/local-chat-transport";
 
 describe("local offline AI chat routing & Qwen3 ChatML", () => {
-  it("configures local Qwen3 defaults with num_ctx 4096 and offline audio/OCR disabled", () => {
-    expect(DEFAULT_SETTINGS.localModelId).toContain("Qwen3-1.7B");
-    expect(DEFAULT_SETTINGS.localModelFileName).toBe("Qwen3-1.7B-Q4_K_M.gguf");
-    expect(DEFAULT_SETTINGS.localContextSize).toBe(4096);
+  it("configures local Qwen3 defaults with num_ctx 2048 and offline audio/OCR disabled", () => {
+    expect(DEFAULT_SETTINGS.localModelId).toContain("Qwen3-0.6B");
+    expect(DEFAULT_SETTINGS.localModelFileName).toBe("Qwen3-0.6B-Q4_K_M.gguf");
+    expect(DEFAULT_SETTINGS.localContextSize).toBe(2048);
     expect(DEFAULT_SETTINGS.enableImageDescription).toBe(false);
     expect(DEFAULT_SETTINGS.enableAudioTranscription).toBe(false);
   });

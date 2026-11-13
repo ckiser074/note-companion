@@ -9,7 +9,7 @@ interface TranscriptionButtonProps {
 }
 
 const OFFLINE_AUDIO_DISABLED_MSG =
-  "Audio transcription is disabled in 100% offline text-only mode (Qwen3-1.7B).";
+  "Audio transcription is disabled in 100% offline text-only mode (Qwen3-0.6B).";
 
 export const TranscriptionButton: React.FC<TranscriptionButtonProps> = () => {
   const handleTranscribe = () => {

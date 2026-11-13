@@ -27,6 +27,8 @@ async function handleLoad(
   nCtx: number,
   nThreads: number
 ): Promise<void> {
+  const effectiveThreads = self.crossOriginIsolated ? nThreads : 1;
+
   if (!wasmBuffer) {
     throw new Error("WASM binary was not transferred to the AI worker.");
   }
@@ -75,7 +77,8 @@ async function handleLoad(
 
   await instance.loadModel([modelBlob], {
     n_ctx: nCtx,
-    n_threads: nThreads,
+    n_threads: effectiveThreads,
+    n_parallel: 1,
     n_gpu_layers: 0,
     warmup: true,
   });
@@ -96,6 +99,7 @@ async function handleGenerate(msg: {
   prompt: string;
   maxTokens: number;
   temperature: number;
+  topK: number;
   topP: number;
   stop: string[];
 }): Promise<void> {
@@ -108,17 +112,44 @@ async function handleGenerate(msg: {
   activeRequestId = msg.requestId;
 
   let fullText = "";
+  let tokenCount = 0;
+  let pendingTokenText = "";
 
   try {
-    const stream = await wllama.createCompletion({
+    post({
+      type: "progress",
+      requestId: msg.requestId,
+      message: "Analyzing prompt on local CPU...",
+    });
+    const completionOptions = {
       prompt: msg.prompt,
       max_tokens: msg.maxTokens,
       temperature: msg.temperature,
+      top_k: msg.topK,
       top_p: msg.topP,
       stop: msg.stop,
-      stream: true,
+      stream: true as const,
       abortSignal: controller.signal,
+      // Avoid reusing llama.cpp's prompt KV cache between note requests.
+      cache_prompt: false,
+    };
+    const stream = await wllama.createCompletion(completionOptions);
+
+    post({
+      type: "progress",
+      requestId: msg.requestId,
+      message: "Generating local response...",
     });
+    const emitTokenProgress = () => {
+      if (!pendingTokenText) return;
+      post({
+        type: "token",
+        requestId: msg.requestId,
+        count: tokenCount,
+        text: pendingTokenText,
+      });
+      pendingTokenText = "";
+    };
 
     for await (const chunk of stream) {
       if (controller.signal.aborted) {
@@ -127,13 +158,12 @@ async function handleGenerate(msg: {
       const delta = chunk.choices?.[0]?.text ?? "";
       if (delta) {
         fullText += delta;
-        post({
-          type: "token",
-          requestId: msg.requestId,
-          delta,
-        });
+        tokenCount++;
+        pendingTokenText += delta;
+        if (tokenCount % 5 === 0) emitTokenProgress();
       }
     }
+    emitTokenProgress();
 
     post({
       type: "done",

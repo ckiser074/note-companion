@@ -1,19 +1,23 @@
 import type { ChatMLMessage } from "./types";
 import type { ParaCategory, ParaRoots } from "../lib/para";
 import { PARA_CATEGORIES } from "../lib/para";
+import { getTokenCount } from "../utils/token-counter";
 
 export const QWEN_IM_START = "<|im_start|>";
 export const QWEN_IM_END = "<|im_end|>";
 export const QWEN_STOP_TOKENS = [QWEN_IM_END, "<|endoftext|>"];
+export const PARA_ORGANIZATION_ASSISTANT_PREFILL =
+  '<think>\n\n</think>\n\n{"paraCategory": "';
 
 /**
  * Formats conversation turns in Qwen3 ChatML format.
- * By default injects `/no_think` into the system prompt so Qwen3-1.7B responds
+ * By default injects `/no_think` into the system prompt so Qwen3 responds
  * directly with fast JSON or concise text instead of long <think> traces.
  */
 export function formatQwenChatML(
   messages: ChatMLMessage[],
-  suppressThinking = true
+  suppressThinking = true,
+  assistantPrefill = ""
 ): string {
   const normalized: ChatMLMessage[] = messages.map((m) => ({
     role: m.role,
@@ -42,8 +46,41 @@ export function formatQwenChatML(
   for (const msg of normalized) {
     prompt += `${QWEN_IM_START}${msg.role}\n${msg.content}${QWEN_IM_END}\n`;
   }
-  prompt += `${QWEN_IM_START}assistant\n`;
+  prompt += `${QWEN_IM_START}assistant\n${assistantPrefill}`;
   return prompt;
+}
+
+export function fitChatMLMessagesToEstimatedTokenBudget(
+  messages: ChatMLMessage[],
+  maxTokens: number,
+  assistantPrefill = ""
+): ChatMLMessage[] {
+  const fitted = messages.map((message) => ({ ...message }));
+  const userMessage = [...fitted].reverse().find(
+    (message) => message.role === "user"
+  );
+
+  while (
+    userMessage &&
+    userMessage.content.length > 0 &&
+    getTokenCount(formatQwenChatML(fitted, true, assistantPrefill)) > maxTokens
+  ) {
+    userMessage.content = userMessage.content.slice(
+      0,
+      Math.max(0, userMessage.content.length - 80)
+    );
+  }
+
+  if (
+    getTokenCount(formatQwenChatML(fitted, true, assistantPrefill)) >
+    maxTokens
+  ) {
+    throw new Error(
+      `PARA organization instructions exceed the ${maxTokens}-token prompt budget.`
+    );
+  }
+
+  return fitted;
 }
 
 /**
@@ -61,34 +98,47 @@ export function stripThinkingBlocks(text: string): string {
   return cleaned.trimStart();
 }
 
+export function parsePrefilledOrganizationOutput<T>(raw: string): T {
+  const cleaned = stripThinkingBlocks(raw)
+    .replace(/```(?:json)?/gi, "")
+    .trimStart();
+  const input = cleaned.startsWith("{")
+    ? raw
+    : `${PARA_ORGANIZATION_ASSISTANT_PREFILL}${raw}`;
+  return parseJSONFromModelOutput<T>(input, raw);
+}
+
 /**
- * Strips markdown code fences and extracts the first balanced JSON object or array
- * from a model completion string.
+ * Extracts and repairs JSON from model output before parsing it.
  */
-export function parseJSONFromModelOutput<T>(raw: string): T {
-  const withoutThinking = stripThinkingBlocks(raw).trim();
-  const withoutFences = withoutThinking
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "")
+export function parseJSONFromModelOutput<T>(
+  raw: string,
+  rawForDiagnostics = raw
+): T {
+  const cleaned = stripThinkingBlocks(raw)
+    .replace(/```(?:json)?/gi, "")
     .trim();
-
-  try {
-    return JSON.parse(withoutFences) as T;
-  } catch {
-    // Scan for first balanced JSON object or array
-  }
-
-  const candidate = extractBalancedJson(withoutFences);
+  const candidate = extractJsonCandidate(cleaned);
   if (!candidate) {
+    console.warn("[PARA Companion] Raw model output:", rawForDiagnostics);
     throw new Error(
-      `Model output did not contain valid JSON: ${withoutFences.slice(0, 240)}`
+      `Model output did not contain valid JSON. Raw model output: ${rawForDiagnostics}`
     );
   }
 
-  return JSON.parse(candidate) as T;
+  const repaired = repairJsonCandidate(candidate);
+  try {
+    return JSON.parse(repaired) as T;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn("[PARA Companion] Raw model output:", rawForDiagnostics);
+    throw new Error(
+      `Model output did not contain valid JSON (${reason}). Raw model output: ${rawForDiagnostics}`
+    );
+  }
 }
 
-function extractBalancedJson(input: string): string | null {
+function extractJsonCandidate(input: string): string | null {
   const objStart = input.indexOf("{");
   const arrStart = input.indexOf("[");
 
@@ -108,38 +158,69 @@ function extractBalancedJson(input: string): string | null {
 
   if (start === -1) return null;
 
-  let depth = 0;
+  const lastClose = input.lastIndexOf(closeChar);
+  return lastClose >= start
+    ? input.slice(start, lastClose + 1)
+    : input.slice(start);
+}
+
+function repairJsonCandidate(input: string): string {
+  let repaired = "";
+  const closers: string[] = [];
   let inString = false;
   let escaped = false;
 
-  for (let i = start; i < input.length; i++) {
+  for (let i = 0; i < input.length; i++) {
     const ch = input[i];
     if (inString) {
       if (escaped) {
+        repaired += ch;
         escaped = false;
       } else if (ch === "\\") {
+        repaired += ch;
         escaped = true;
       } else if (ch === '"') {
+        repaired += ch;
         inString = false;
+      } else if (ch === "\n" || ch === "\r") {
+        repaired += "\\n";
+        if (ch === "\r" && input[i + 1] === "\n") i++;
+      } else {
+        repaired += ch;
       }
       continue;
     }
 
     if (ch === '"') {
+      repaired += ch;
       inString = true;
       continue;
     }
-    if (ch === openChar) {
-      depth++;
-    } else if (ch === closeChar) {
-      depth--;
-      if (depth === 0) {
-        return input.slice(start, i + 1);
+    if (ch === ",") {
+      let next = i + 1;
+      while (next < input.length && /\s/.test(input[next])) next++;
+      if (
+        next === input.length ||
+        input[next] === "}" ||
+        input[next] === "]"
+      ) {
+        continue;
       }
     }
+
+    if (ch === "{") {
+      closers.push("}");
+    } else if (ch === "[") {
+      closers.push("]");
+    } else if (ch === "}" || ch === "]") {
+      if (closers[closers.length - 1] === ch) closers.pop();
+    }
+    repaired += ch;
   }
 
-  return null;
+  if (inString) repaired += '"';
+  while (closers.length) repaired += closers.pop();
+  return repaired;
 }
 
 export function buildTagsMessages(
@@ -185,31 +266,54 @@ export function buildFoldersMessages(
   count = 3,
   roots?: ParaRoots
 ): ChatMLMessage[] {
-  const folderList = folders.length
-    ? `Existing vault folders: ${folders.join(", ")}`
-    : "No existing vault folders.";
+  const folderList = folders.slice(0, 30);
+  const extraInstructions = customInstructions.trim().slice(0, 200);
 
   return [
     {
       role: "system",
-      content: `You are an Obsidian vault folder classifier. Return ONLY a valid JSON object matching this exact schema, with no markdown fences and no extra prose:
+      content: `Route this Obsidian note using PARA. Return JSON only:
 {"folders":[{"paraCategory":"project","folder":"1_Projects/Obsidian Plugin","score":92,"isNewFolder":false,"reason":"Brief reason"}]}
-Rules:
-- Classify each note as exactly one of project, area, resource, or archive.
-- Projects are active efforts with a specific goal, deliverable, or deadline.
-- Areas are ongoing responsibilities and life or work spheres without an end date.
-- Resources are reference material, research, tutorials, and evergreen interests.
-- Archives are completed projects, inactive areas, and outdated material.
-- Return up to ${count} destination folders sorted by score descending (0-100).
-- Each folder MUST be inside the matching configured PARA root. Prefer the root's existing subfolders when relevant; propose a new subfolder only when none fit.
-- "isNewFolder" is false only when the exact path exists in the provided folder tree.
-- ${roots ? `Configured roots: ${PARA_CATEGORIES.map((category) => `${category}=${roots[category]}`).join(", ")}` : ""}
-- ${folderList}
-${customInstructions ? `- User instructions: ${customInstructions}` : ""}`,
+Choose one: project=active goal/deadline; area=ongoing responsibility; resource=reference/interest; archive=completed/inactive.
+Use the matching root. Prefer an exact existing path; otherwise return the root or a short new child. isNewFolder is false only for an exact existing path.
+Roots: ${roots ? PARA_CATEGORIES.map((category) => `${category}=${roots[category]}`).join(", ") : "not configured"}
+Existing paths (max 30): ${folderList.length ? folderList.join(", ") : "none"}
+Return up to ${count} results, score 0-100, highest first.${extraInstructions ? ` Extra instructions: ${extraInstructions}` : ""}`,
     },
     {
       role: "user",
       content: `File: "${fileName}"\n\nContent:\n"""\n${content}\n"""`,
+    },
+  ];
+}
+
+export function buildOrganizationMessages(
+  content: string,
+  fileName: string,
+  folders: string[],
+  existingTags: string[],
+  roots: ParaRoots,
+  currentCategory?: ParaCategory
+): ChatMLMessage[] {
+  const folderList = folders.slice(0, 12);
+  const tagList = existingTags.slice(0, 12);
+
+  return [
+    {
+      role: "system",
+      content: `Classify and organize this Obsidian note with PARA. Return one compact JSON object only:
+{"paraCategory":"projects","targetFolder":"1_Projects/Subfolder","suggestedFilename":"Clean Title","tags":["para/project","topic"]}
+Projects=active goal/deadline; areas=ongoing responsibility; resources=reference/interest; archives=completed/inactive.
+Choose a configured root and prefer a matching existing folder. Use a short child only if useful. Keep the filename concise.
+Tags: 2-4 lowercase hyphenated values, no #, including exactly one matching status tag (para/project, para/area, para/resource, para/archive).
+Roots: projects=${roots.project}; areas=${roots.area}; resources=${roots.resource}; archives=${roots.archive}
+Folders: ${folderList.length ? folderList.join(", ") : "none"}
+Existing tags: ${tagList.length ? tagList.join(", ") : "none"}
+${currentCategory ? `Current category=${currentCategory}; retain unless clearly wrong.` : ""}`,
+    },
+    {
+      role: "user",
+      content: `File: ${fileName}\n${content}`,
     },
   ];
 }

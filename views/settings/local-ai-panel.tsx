@@ -2,6 +2,7 @@ import React, { useEffect } from "react";
 import { Notice, type Setting } from "obsidian";
 import type FileOrganizer from "../../index";
 import { localAIStore, useLocalAIState } from "../../ai/local-ai-store";
+import { DEFAULT_LOCAL_MODEL_FILENAME } from "../../ai/model-downloader";
 
 interface LocalAIPanelProps {
   plugin: FileOrganizer;
@@ -27,6 +28,10 @@ export const LocalAIPanel: React.FC<LocalAIPanelProps> = ({ plugin }) => {
   const [contextSize, setContextSize] = React.useState(
     plugin.settings.localContextSize
   );
+  const [availableModels, setAvailableModels] = React.useState<string[]>([]);
+  const [selectedModel, setSelectedModel] = React.useState(
+    plugin.settings.localModelFileName
+  );
 
   const maxThreads =
     typeof navigator !== "undefined" && navigator.hardwareConcurrency
@@ -35,6 +40,19 @@ export const LocalAIPanel: React.FC<LocalAIPanelProps> = ({ plugin }) => {
 
   useEffect(() => {
     plugin.localAI?.refreshFileStatus();
+    let active = true;
+    void plugin.localAI
+      .listAvailableModels()
+      .then((models) => {
+        if (active) setAvailableModels(models);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        new Notice(`Could not list local GGUF models: ${message}`, 7000);
+      });
+    return () => {
+      active = false;
+    };
   }, [plugin]);
 
   const isBusy =
@@ -64,7 +82,7 @@ export const LocalAIPanel: React.FC<LocalAIPanelProps> = ({ plugin }) => {
               Local AI Engine (100% Offline CPU)
             </h3>
             <p className="text-sm text-[--text-muted] m-0">
-              Runs Qwen3-1.7B (Q4_K_M GGUF) inside an isolated WebAssembly CPU
+              Runs Qwen3-0.6B (Q4_K_M GGUF) inside an isolated WebAssembly CPU
               worker via <code>@wllama/wllama</code>. Zero external servers or
               API keys required.
             </p>
@@ -102,7 +120,7 @@ export const LocalAIPanel: React.FC<LocalAIPanelProps> = ({ plugin }) => {
             <span className="text-[--text-normal]">
               {aiState.modelExists
                 ? formatBytes(aiState.modelSizeBytes)
-                : "Not downloaded (~1.1 GB on first run)"}
+                : "Not downloaded (~480 MB on first run)"}
             </span>
           </div>
           {aiState.modelPath && (
@@ -117,6 +135,40 @@ export const LocalAIPanel: React.FC<LocalAIPanelProps> = ({ plugin }) => {
             </div>
           )}
         </div>
+
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-[--text-normal]">Installed GGUF model</span>
+          <select
+            className="px-2 py-1.5 bg-[--background-primary] border border-[--background-modifier-border] rounded text-[--text-normal]"
+            value={selectedModel}
+            disabled={isBusy}
+            onChange={(event) => {
+              const nextModel = event.target.value;
+              void plugin.localAI
+                .selectModel(nextModel)
+                .then(() => setSelectedModel(nextModel))
+                .catch((error) => {
+                  const message =
+                    error instanceof Error ? error.message : String(error);
+                  new Notice(`Could not select local model: ${message}`, 7000);
+                });
+            }}
+          >
+            {!availableModels.includes(selectedModel) && (
+              <option value={selectedModel}>{selectedModel}</option>
+            )}
+            {availableModels.map((model) => (
+              <option key={model} value={model}>
+                {model}
+              </option>
+            ))}
+            {!availableModels.includes(DEFAULT_LOCAL_MODEL_FILENAME) && (
+              <option value={DEFAULT_LOCAL_MODEL_FILENAME}>
+                {DEFAULT_LOCAL_MODEL_FILENAME} (downloadable default)
+              </option>
+            )}
+          </select>
+        </label>
 
         {(aiState.downloadProgress || aiState.loadProgress) && (
           <div className="space-y-1.5">
@@ -186,7 +238,9 @@ export const LocalAIPanel: React.FC<LocalAIPanelProps> = ({ plugin }) => {
             </button>
           )}
 
-          {aiState.modelExists && !isBusy && (
+          {aiState.modelExists &&
+            aiState.modelFileName === DEFAULT_LOCAL_MODEL_FILENAME &&
+            !isBusy && (
             <button
               onClick={() => {
                 void plugin.localAI
@@ -245,7 +299,7 @@ export const LocalAIPanel: React.FC<LocalAIPanelProps> = ({ plugin }) => {
           <div className="setting-item-info">
             <div className="setting-item-name">Context Size (num_ctx)</div>
             <div className="setting-item-description">
-              Token context window for local inference (default: 4096). Larger
+              Token context window for local inference (default: 2048). Larger
               values use more RAM. Reload the model after changing.
             </div>
           </div>
@@ -254,14 +308,14 @@ export const LocalAIPanel: React.FC<LocalAIPanelProps> = ({ plugin }) => {
               className="px-2 py-1.5 bg-[--background-primary] border border-[--background-modifier-border] rounded text-[--text-normal]"
               value={String(contextSize)}
               onChange={(e) => {
-                const value = parseInt(e.target.value, 10) || 4096;
+                const value = parseInt(e.target.value, 10) || 2048;
                 setContextSize(value);
                 plugin.settings.localContextSize = value;
                 void plugin.saveSettings();
               }}
             >
-              <option value="2048">2048</option>
-              <option value="4096">4096 (default)</option>
+              <option value="2048">2048 (default)</option>
+              <option value="4096">4096</option>
               <option value="8192">8192</option>
               <option value="16384">16384</option>
             </select>
@@ -331,7 +385,7 @@ export function renderLocalAIStatusRow(
       progressBarContainer.addClass("hidden");
       const sizeStr = state.modelExists
         ? `Cached on disk (${formatBytes(state.modelSizeBytes)}).`
-        : "Not downloaded (~1.1 GB on first run).";
+        : "Not downloaded (~480 MB on first run).";
       setting.setDesc(
         `${state.statusMessage}. ${sizeStr}${state.error ? ` Error: ${state.error}` : ""}`
       );

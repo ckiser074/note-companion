@@ -39,9 +39,11 @@ export interface ChatMLMessage {
 export interface GenerateOptions {
   maxTokens?: number;
   temperature?: number;
+  topK?: number;
   topP?: number;
   stop?: string[];
   suppressThinking?: boolean;
+  assistantPrefill?: string;
   signal?: AbortSignal;
 }
 
@@ -68,6 +70,7 @@ export type WorkerInMessage =
       prompt: string;
       maxTokens: number;
       temperature: number;
+      topK: number;
       topP: number;
       stop: string[];
     }
@@ -91,7 +94,13 @@ export type WorkerOutMessage =
   | {
       type: "token";
       requestId: string;
-      delta: string;
+      count: number;
+      text: string;
+    }
+  | {
+      type: "progress";
+      requestId: string;
+      message: string;
     }
   | {
       type: "done";
