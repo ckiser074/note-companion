@@ -1,74 +1,113 @@
 import React, { useRef } from "react";
 import { logger } from "../../../../services/logger";
 import { addSearchContext, useContextItems } from "../use-context-items";
+import { buildSearchExpansionMessages } from "../../../../ai/chatml";
+import {
+  rankLocalSearchDocuments,
+  type SearchDocument,
+} from "../../../../lib/local-search";
+import { usePlugin } from "../../provider";
 import { ToolHandlerProps } from "./types";
-
-interface SearchArgs {
-  query: string;
-}
 
 export function SearchHandler({
   toolInvocation,
   handleAddResult,
   app,
 }: ToolHandlerProps) {
+  const plugin = usePlugin();
   const hasFetchedRef = useRef(false);
 
   const searchNotes = async (query: string) => {
-    const MAX_RESULTS = 10;
-    const PREVIEW_LENGTH = 500;
-    
+    const expanded = await plugin.localAI.generateJSON<{ queries?: unknown }>(
+      buildSearchExpansionMessages(query),
+      { temperature: 0.1, maxTokens: 128 }
+    );
+    const expandedQueries = Array.isArray(expanded.queries)
+      ? expanded.queries.filter(
+          (value): value is string =>
+            typeof value === "string" && value.trim().length > 0
+        )
+      : [];
+    const queries = [...new Set([query, ...expandedQueries])].slice(0, 8);
     const files = app.vault.getMarkdownFiles();
-    const searchTerms = query.toLowerCase().split(/\s+/);
+    const rankedResults: Array<
+      ReturnType<typeof rankLocalSearchDocuments>[number] & {
+        contentPreview: string;
+        contentLength: number;
+        wordCount: number;
+      }
+    > = [];
+    const batchSize = 32;
 
-    const searchResults = await Promise.all(
-      files.map(async file => {
-        const content = await app.vault.read(file);
-        const lowerContent = content.toLowerCase();
-
-        const allTermsPresent = searchTerms.every(term => {
-          const regex = new RegExp(`(^|\\W)${term}(\\W|$)`, "i");
-          return regex.test(lowerContent);
-        });
-
-        if (allTermsPresent) {
+    for (let offset = 0; offset < files.length; offset += batchSize) {
+      const batch = await Promise.all(
+        files.slice(offset, offset + batchSize).map(async (file) => {
+          const content = await app.vault.read(file);
+          const cache = app.metadataCache.getFileCache(file);
+          const frontmatterTags = cache?.frontmatter?.tags;
+          const tags = [
+            ...(cache?.tags?.map((tag) => tag.tag) ?? []),
+            ...(Array.isArray(frontmatterTags)
+              ? frontmatterTags.filter(
+                  (tag): tag is string => typeof tag === "string"
+                )
+              : typeof frontmatterTags === "string"
+              ? [frontmatterTags]
+              : []),
+          ];
+          const title =
+            typeof cache?.frontmatter?.title === "string"
+              ? cache.frontmatter.title
+              : file.basename;
           return {
-            title: file.basename,
-            contentPreview: content.slice(0, PREVIEW_LENGTH) + (content.length > PREVIEW_LENGTH ? '...' : ''),
-            contentLength: content.length,
-            wordCount: content.split(/\s+/).length,
             path: file.path,
-            // Keep full content for context UI, but don't send to AI
-            content: content,
-          };
-        }
-        return null;
-      })
-    );
+            title,
+            tags,
+            content,
+          } satisfies SearchDocument;
+        })
+      );
+      rankedResults.push(
+        ...rankLocalSearchDocuments(batch, queries, 10).map((result) => ({
+          ...result,
+          contentPreview:
+            result.content.slice(0, 500) +
+            (result.content.length > 500 ? "..." : ""),
+          contentLength: result.content.length,
+          wordCount: result.content.split(/\s+/).length,
+        }))
+      );
+    }
 
-    const filteredResults = searchResults.filter((result): result is NonNullable<typeof result> => 
-      result !== null
-    );
-    
-    // Limit to MAX_RESULTS
-    return filteredResults.slice(0, MAX_RESULTS);
+    return rankedResults
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
   };
 
   React.useEffect(() => {
     const handleSearchNotes = async () => {
       if (!hasFetchedRef.current && !("result" in toolInvocation)) {
         hasFetchedRef.current = true;
-        const { query } = toolInvocation.args as SearchArgs;
+        const args = toolInvocation.args;
+        const query =
+          args &&
+          typeof args === "object" &&
+          "query" in args &&
+          typeof args.query === "string"
+            ? args.query
+            : "";
+        if (!query.trim()) {
+          handleAddResult(JSON.stringify({ error: "Search query is missing" }));
+          return;
+        }
         
         try {
           const searchResults = await searchNotes(query);
           
-          // Add ONLY metadata to context (reference-based, ephemeral)
-          // Full content is NOT stored in context
-          const contextResults = searchResults.map(({ content, ...metadata }) => metadata);
+          const contextResults = searchResults.map(
+            ({ content, ...metadata }) => metadata
+          );
           addSearchContext(query, contextResults);
-          
-          // Send same minimal data to AI (metadata only)
           handleAddResult(JSON.stringify(contextResults));
         } catch (error) {
           logger.error("Error searching notes:", error);

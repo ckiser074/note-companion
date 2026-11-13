@@ -4,13 +4,14 @@ import {
   DEFAULT_LOCAL_MODEL_ID,
   DEFAULT_LOCAL_MODEL_URL,
 } from "./ai/model-downloader";
+import { DEFAULT_PARA_ROOTS } from "./lib/para";
 
 function getDefaultCpuThreads(): number {
   const hw =
     typeof navigator !== "undefined" && navigator.hardwareConcurrency
       ? navigator.hardwareConcurrency
       : 4;
-  return Math.max(1, Math.min(8, Math.floor(hw / 2)));
+  return Math.max(1, Math.floor(hw / 2));
 }
 
 export class FileOrganizerSettings {
@@ -20,6 +21,11 @@ export class FileOrganizerSettings {
   localModelUrl = DEFAULT_LOCAL_MODEL_URL;
   localCpuThreads = getDefaultCpuThreads();
   localContextSize = 4096;
+  paraProjectsRoot = DEFAULT_PARA_ROOTS.project;
+  paraAreasRoot = DEFAULT_PARA_ROOTS.area;
+  paraResourcesRoot = DEFAULT_PARA_ROOTS.resource;
+  paraArchivesRoot = DEFAULT_PARA_ROOTS.archive;
+  autoCreateParaFolders = true;
 
   useLogs = true;
   defaultDestinationPath = "_NoteCompanion/Processed";
@@ -55,8 +61,7 @@ export class FileOrganizerSettings {
 
   renameInstructions =
     "If document has a human readable name, use it. Otherwise, create a concise, descriptive name for the document based on its key content. Prioritize clarity and searchability, using specific terms that will make the document easy to find later. Avoid generic words and focus on unique, identifying elements.";
-  usePro = true;
-  useSimilarTagsInFrontmatter = false;
+  useSimilarTagsInFrontmatter = true;
   enableAtomicNotes = false;
   ignoreFolders = [""];
   stagingFolder = ".notecompanion/staging";
@@ -90,7 +95,6 @@ export class FileOrganizerSettings {
   enableProcessingNotifications = true;
   inboxNotificationLevel: InboxNotificationLevel = "warning";
   enableScreenpipe = false; // Enable ScreenPipe integration for screen activity search (localhost:3030)
-  screenpipeApiUrl = "http://localhost:3030"; // ScreenPipe API URL
   screenpipeTimeRange = 4; // Default time range in hours for ScreenPipe searches (1-24)
   queryScreenpipeLimit = 10; // Default query limit for ScreenPipe searches (1-100)
 }

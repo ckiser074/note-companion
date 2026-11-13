@@ -1,6 +1,7 @@
 import { App, TFolder, TFile, normalizePath, parseYaml } from "obsidian";
 import { FileOrganizerSettings } from "./settings";
 import { logger } from "./services/logger";
+import { normalizeVaultPath } from "./lib/para";
 
 // Default template names that come with the plugin
 export const DEFAULT_TEMPLATE_NAMES = [
@@ -528,9 +529,15 @@ Important Notes:
 }
 
 export async function ensureFolderExists(app: App, folderPath: string) {
-  if (!(await app.vault.adapter.exists(folderPath))) {
-    await app.vault.createFolder(folderPath);
+  const normalizedPath = normalizeVaultPath(folderPath);
+  if (!normalizedPath || (await app.vault.adapter.exists(normalizedPath))) return;
+  const lastSeparator = normalizedPath.lastIndexOf("/");
+  const parentPath =
+    lastSeparator >= 0 ? normalizedPath.slice(0, lastSeparator) : "";
+  if (parentPath) {
+    await ensureFolderExists(app, parentPath);
   }
+  await app.vault.createFolder(normalizedPath);
 }
 
 export async function checkAndCreateFolders(
@@ -546,6 +553,18 @@ export async function checkAndCreateFolders(
   await ensureFolderExists(app, settings.stagingFolder);
   await ensureFolderExists(app, settings.backupFolderPath);
   await ensureFolderExists(app, settings.recordingsFolderPath);
+  if (settings.autoCreateParaFolders) {
+    for (const folderPath of [
+      settings.paraProjectsRoot,
+      settings.paraAreasRoot,
+      settings.paraResourcesRoot,
+      settings.paraArchivesRoot,
+    ]) {
+      if (folderPath.trim()) {
+        await ensureFolderExists(app, folderPath);
+      }
+    }
+  }
 }
 
 export async function checkAndCreateTemplates(

@@ -1,5 +1,5 @@
 import { Wllama, CacheManager, WllamaAbortError } from "@wllama/wllama";
-import type { WorkerInMessage, WorkerOutMessage } from "./types";
+import type { WorkerInMessage, WorkerOutMessage } from "../ai/types";
 
 const noopCacheBackend = {
   isSupported: () => true,

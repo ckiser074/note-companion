@@ -3,6 +3,7 @@ export type CachedFolderSuggestion = {
   score: number;
   folder: string;
   reason: string;
+  paraCategory?: "project" | "area" | "resource" | "archive";
 };
 
 export type TagSuggestionResult = {

@@ -118,6 +118,33 @@ export function getParaCompanionSettingDefinitions(
     },
     {
       type: "page",
+      name: "PARA Organization",
+      desc: "Configure the four PARA folder roots and automatic folder creation.",
+      items: [
+        {
+          name: "Projects root folder",
+          control: { type: "text", key: "paraProjectsRoot" },
+        },
+        {
+          name: "Areas root folder",
+          control: { type: "text", key: "paraAreasRoot" },
+        },
+        {
+          name: "Resources root folder",
+          control: { type: "text", key: "paraResourcesRoot" },
+        },
+        {
+          name: "Archives root folder",
+          control: { type: "text", key: "paraArchivesRoot" },
+        },
+        {
+          name: "Create PARA root folders automatically",
+          control: { type: "toggle", key: "autoCreateParaFolders" },
+        },
+      ],
+    },
+    {
+      type: "page",
       name: "Organization Preferences",
       desc: "Inbox processing, tagging, renaming, and formatting.",
       items: [
@@ -313,15 +340,6 @@ export function getParaCompanionSettingDefinitions(
         {
           name: "Enable ScreenPipe integration",
           control: { type: "toggle", key: "enableScreenpipe" },
-        },
-        {
-          name: "ScreenPipe API URL",
-          visible: () => settings.enableScreenpipe,
-          control: {
-            type: "text",
-            key: "screenpipeApiUrl",
-            placeholder: "http://localhost:3030",
-          },
         },
         {
           name: "ScreenPipe time range (hours)",

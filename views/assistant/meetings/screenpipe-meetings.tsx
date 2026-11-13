@@ -75,7 +75,7 @@ export const ScreenpipeMeetings: React.FC<ScreenpipeMeetingsProps> = ({
       setUnavailable(false);
 
       try {
-        const client = new ScreenpipeClient(plugin.settings.screenpipeApiUrl);
+        const client = new ScreenpipeClient();
         const available = await client.isAvailable();
         if (!available) {
           setUnavailable(true);
@@ -240,7 +240,6 @@ export const ScreenpipeMeetings: React.FC<ScreenpipeMeetingsProps> = ({
       }
     },
     [
-      plugin.settings.screenpipeApiUrl,
       plugin.settings.screenpipeTimeRange,
     ]
   );

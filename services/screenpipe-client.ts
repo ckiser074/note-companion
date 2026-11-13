@@ -1,6 +1,8 @@
 import { readResponseJson } from "../lib/api-json";
 import { obsidianFetch } from "../lib/obsidian-fetch";
 
+export const DEFAULT_SCREENPIPE_API_URL = "http://localhost:3030";
+
 /**
  * Parse a timestamp string from ScreenPipe into a Date.
  * Handles: ISO 8601 (with or without Z), ISO without timezone (treated as UTC),
@@ -54,7 +56,7 @@ export interface ScreenpipeResult {
 }
 
 export class ScreenpipeClient {
-  constructor(private apiUrl: string = "http://localhost:3030") {}
+  constructor(private apiUrl: string = DEFAULT_SCREENPIPE_API_URL) {}
 
   /**
    * Check if ScreenPipe API is available

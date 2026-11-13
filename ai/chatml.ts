@@ -1,4 +1,6 @@
 import type { ChatMLMessage } from "./types";
+import type { ParaCategory, ParaRoots } from "../lib/para";
+import { PARA_CATEGORIES } from "../lib/para";
 
 export const QWEN_IM_START = "<|im_start|>";
 export const QWEN_IM_END = "<|im_end|>";
@@ -145,7 +147,8 @@ export function buildTagsMessages(
   fileName: string,
   existingTags: string[],
   customInstructions: string,
-  count = 3
+  count = 3,
+  currentCategory?: ParaCategory
 ): ChatMLMessage[] {
   const existingList = existingTags.length
     ? `Existing vault tags (prefer matching these when relevant): ${existingTags.join(", ")}`
@@ -154,11 +157,15 @@ export function buildTagsMessages(
   return [
     {
       role: "system",
-      content: `You are an Obsidian note tagging engine. Return ONLY a valid JSON object matching this exact schema, with no markdown fences and no extra prose:
-{"tags":[{"score":90,"tag":"#example-tag","reason":"Brief reason","isNew":false}]}
+      content: `You are an Obsidian PARA note classifier and tagging engine. Return ONLY a valid JSON object matching this exact schema, with no markdown fences and no extra prose:
+{"paraCategory":"project","tags":[{"score":90,"tag":"example-tag","reason":"Brief reason","isNew":false}]}
 Rules:
-- Suggest up to ${count} relevant tags sorted by score descending (0-100).
-- Every tag MUST start with "#" and contain no spaces (use hyphens).
+- Classify the note as exactly one of project, area, resource, or archive based on its content and actionability.
+- Projects are active efforts with a specific goal, deliverable, or deadline. Areas are ongoing responsibilities without an end date. Resources are reference material and evergreen interests. Archives are completed projects, inactive areas, and outdated material.
+- ${currentCategory ? `The note is currently inside a PARA ${currentCategory} folder; keep that category unless its content clearly contradicts the location.` : "The note is not currently inside a PARA folder; classify it from its content."}
+- Suggest up to ${count} relevant lowercase tags sorted by score descending (0-100).
+- Tags must not start with "#" and must not contain spaces (use hyphens).
+- Do not include any para/* tag in the tags array; the plugin adds the selected category status tag.
 - Set "isNew" to false if the tag is from the existing tags list, otherwise true.
 - ${existingList}
 ${customInstructions ? `- User instructions: ${customInstructions}` : ""}`,
@@ -175,7 +182,8 @@ export function buildFoldersMessages(
   fileName: string,
   folders: string[],
   customInstructions: string,
-  count = 3
+  count = 3,
+  roots?: ParaRoots
 ): ChatMLMessage[] {
   const folderList = folders.length
     ? `Existing vault folders: ${folders.join(", ")}`
@@ -185,10 +193,17 @@ export function buildFoldersMessages(
     {
       role: "system",
       content: `You are an Obsidian vault folder classifier. Return ONLY a valid JSON object matching this exact schema, with no markdown fences and no extra prose:
-{"folders":[{"folder":"Folder/Subfolder","score":92,"isNewFolder":false,"reason":"Brief reason"}]}
+{"folders":[{"paraCategory":"project","folder":"1_Projects/Obsidian Plugin","score":92,"isNewFolder":false,"reason":"Brief reason"}]}
 Rules:
-- Suggest up to ${count} destination folders sorted by score descending (0-100).
-- Prefer existing vault folders when relevant ("isNewFolder": false). Only suggest a new folder path ("isNewFolder": true) if none fit.
+- Classify each note as exactly one of project, area, resource, or archive.
+- Projects are active efforts with a specific goal, deliverable, or deadline.
+- Areas are ongoing responsibilities and life or work spheres without an end date.
+- Resources are reference material, research, tutorials, and evergreen interests.
+- Archives are completed projects, inactive areas, and outdated material.
+- Return up to ${count} destination folders sorted by score descending (0-100).
+- Each folder MUST be inside the matching configured PARA root. Prefer the root's existing subfolders when relevant; propose a new subfolder only when none fit.
+- "isNewFolder" is false only when the exact path exists in the provided folder tree.
+- ${roots ? `Configured roots: ${PARA_CATEGORIES.map((category) => `${category}=${roots[category]}`).join(", ")}` : ""}
 - ${folderList}
 ${customInstructions ? `- User instructions: ${customInstructions}` : ""}`,
     },
@@ -196,6 +211,17 @@ ${customInstructions ? `- User instructions: ${customInstructions}` : ""}`,
       role: "user",
       content: `File: "${fileName}"\n\nContent:\n"""\n${content}\n"""`,
     },
+  ];
+}
+
+export function buildSearchExpansionMessages(query: string): ChatMLMessage[] {
+  return [
+    {
+      role: "system",
+      content:
+        'Expand the search query with concise related terms and synonyms. Return ONLY JSON: {"queries":["original query","related term"]}. Do not answer the query.',
+    },
+    { role: "user", content: query },
   ];
 }
 

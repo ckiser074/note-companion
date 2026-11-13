@@ -45,7 +45,7 @@ const reactAliases = {
 
 async function buildAiWorkerCode() {
 	const result = await esbuild.build({
-		entryPoints: [path.join(pluginDir, "ai/ai-worker.ts")],
+		entryPoints: [path.join(pluginDir, "workers/ai-worker.ts")],
 		bundle: true,
 		write: false,
 		platform: "browser",

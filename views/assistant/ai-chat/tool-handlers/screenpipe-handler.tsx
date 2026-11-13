@@ -170,19 +170,17 @@ export function ScreenpipeHandler({
         }
 
         setStatus("Loading ScreenPipe client...");
-        const { ScreenpipeClient } = await import(
+        const { ScreenpipeClient, DEFAULT_SCREENPIPE_API_URL } = await import(
           "../../../../services/screenpipe-client"
         );
-        const client = new ScreenpipeClient(
-          currentPlugin.settings.screenpipeApiUrl
-        );
+        const client = new ScreenpipeClient();
 
         setStatus("Checking ScreenPipe connection...");
         // Check if ScreenPipe is available
         const isAvailable = await client.isAvailable();
         if (!isAvailable) {
           setStatus("ScreenPipe not available");
-          const errorMsg = `ScreenPipe is not running. Please start ScreenPipe on ${currentPlugin.settings.screenpipeApiUrl}`;
+          const errorMsg = `ScreenPipe is not running. Please start ScreenPipe on ${DEFAULT_SCREENPIPE_API_URL}`;
           setError(errorMsg);
           logger.debug(
             "ScreenPipe handler: Not available, sending error result"

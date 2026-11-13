@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import type { Setting } from "obsidian";
+import { Notice, type Setting } from "obsidian";
 import type FileOrganizer from "../../index";
 import { localAIStore, useLocalAIState } from "../../ai/local-ai-store";
 
@@ -171,7 +171,7 @@ export const LocalAIPanel: React.FC<LocalAIPanelProps> = ({ plugin }) => {
                 ? "Reload Local AI"
                 : aiState.modelExists
                 ? "Load Local AI"
-                : "Initialize Local AI"}
+                : "Download & Initialize Local AI"}
             </button>
           )}
 
@@ -189,11 +189,18 @@ export const LocalAIPanel: React.FC<LocalAIPanelProps> = ({ plugin }) => {
           {aiState.modelExists && !isBusy && (
             <button
               onClick={() => {
-                void plugin.localAI.deleteModel();
+                void plugin.localAI
+                  .deleteModel()
+                  .then(() => plugin.localAI.initialize({ autoDownload: true }))
+                  .catch((error) => {
+                    const message =
+                      error instanceof Error ? error.message : String(error);
+                    new Notice(`Could not redownload local model: ${message}`, 7000);
+                  });
               }}
               className="px-3 py-1.5 rounded border border-[--background-modifier-border] text-[--text-error] hover:bg-[--background-modifier-hover]"
             >
-              Delete Local Weights
+              Redownload Model
             </button>
           )}
         </div>
@@ -286,7 +293,7 @@ export function renderLocalAIStatusRow(
   });
 
   const actionBtn = controlEl.createEl("button", {
-    text: "Initialize Local AI",
+    text: "Download & Initialize Local AI",
     cls: "mod-cta",
   });
 
@@ -335,7 +342,7 @@ export function renderLocalAIStatusRow(
           ? "Reload Local AI"
           : state.modelExists
           ? "Load Local AI"
-          : "Initialize Local AI";
+          : "Download & Initialize Local AI";
       if (state.modelExists) {
         secondaryBtn.removeClass("hidden");
       } else {
@@ -356,7 +363,13 @@ export function renderLocalAIStatusRow(
   });
 
   secondaryBtn.addEventListener("click", () => {
-    void plugin.localAI?.deleteModel();
+    void plugin.localAI
+      .deleteModel()
+      .then(() => plugin.localAI.initialize({ autoDownload: true }))
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        new Notice(`Could not redownload local model: ${message}`, 7000);
+      });
   });
 
   plugin.localAI?.refreshFileStatus();

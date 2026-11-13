@@ -81,6 +81,16 @@ import {
   buildNameMessages,
   buildTagsMessages,
 } from "./ai/chatml";
+import {
+  getParaCategoryForPath,
+  getParaStatusTag,
+  DEFAULT_PARA_ROOTS,
+  normalizeVaultPath,
+  normalizeVaultTag,
+  PARA_CATEGORIES,
+  type ParaCategory,
+  type ParaRoots,
+} from "./lib/para";
 import * as React from "react";
 import { createRoot, Root } from "react-dom/client";
 
@@ -93,6 +103,7 @@ export interface FolderSuggestion {
   score: number;
   folder: string;
   reason: string;
+  paraCategory?: ParaCategory;
 }
 
 type ConceptChunk = { name: string; chunk: string };
@@ -104,8 +115,11 @@ type TagSuggestion = {
   reason: string;
   isNew: boolean;
 };
-type TagsResponse = { tags: TagSuggestion[] };
 type FoldersResponse = { folders: FolderSuggestion[] };
+type TagsResponse = {
+  paraCategory?: ParaCategory;
+  tags: TagSuggestion[];
+};
 type TitleSuggestion = { score: number; title: string; reason: string };
 type TitlesResponse = { titles: TitleSuggestion[] };
 
@@ -900,7 +914,15 @@ export default class FileOrganizer extends Plugin {
     Array<{ score: number; tag: string; reason: string; isNew: boolean }>
   > {
     const cutoff = this.settings.contentCutoffChars;
-    const cacheKey = buildSuggestionCacheKey(filePath, content, cutoff);
+    const currentCategory = getParaCategoryForPath(
+      filePath,
+      this.getParaRoots()
+    );
+    const cacheKey = `${buildSuggestionCacheKey(
+      filePath,
+      content,
+      cutoff
+    )}:${currentCategory ?? "unfiled"}`;
 
     if (!options?.forceRefresh) {
       const cached = getCachedTagSuggestions(cacheKey);
@@ -919,28 +941,69 @@ export default class FileOrganizer extends Plugin {
           filePath,
           tagsForAI,
           this.settings.customTagInstructions,
-          3
+          3,
+          currentCategory
         ),
         { temperature: 0.1, maxTokens: 512, signal: options?.signal }
       );
 
+      const paraCategory =
+        response.paraCategory &&
+        PARA_CATEGORIES.includes(response.paraCategory)
+          ? response.paraCategory
+          : currentCategory ?? "resource";
+      const paraTag = `#${getParaStatusTag(paraCategory)}`;
       const rawTags = Array.isArray(response.tags) ? response.tags : [];
       const sortedTags: TagSuggestion[] = rawTags
         .filter((t) => t && typeof t.tag === "string" && t.tag.trim().length > 0)
         .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-        .map((tag) => ({
-          score: typeof tag.score === "number" ? tag.score : 80,
-          isNew: Boolean(tag.isNew),
-          tag: tag.tag.startsWith("#") ? tag.tag.trim() : `#${tag.tag.trim()}`,
-          reason: tag.reason || "Relevant to content theme",
-        }));
+        .flatMap((tag) => {
+          const normalizedTag = normalizeVaultTag(tag.tag);
+          if (!normalizedTag) return [];
+          return [{
+            score: typeof tag.score === "number" ? tag.score : 80,
+            isNew: Boolean(tag.isNew),
+            tag: `#${normalizedTag}`,
+            reason: tag.reason || "Relevant to content theme",
+          }];
+        });
 
-      setCachedTagSuggestions(cacheKey, sortedTags);
-      return sortedTags;
+      const normalizedExistingTags = new Set(
+        existingTags.map(normalizeVaultTag)
+      );
+      const resultTags = sortedTags
+        .filter((tag) => !tag.tag.startsWith("#para/"))
+        .slice(0, Math.max(0, 3 - 1));
+      resultTags.push({
+        score: 100,
+        tag: paraTag,
+        reason: `PARA ${paraCategory} classification`,
+        isNew: !normalizedExistingTags.has(paraTag.slice(1)),
+      });
+
+      setCachedTagSuggestions(cacheKey, resultTags);
+      return resultTags;
     } catch (error) {
       logger.error("Error recommending tags with local AI:", error);
       throw error;
     }
+  }
+
+  getParaRoots(): ParaRoots {
+    return {
+      project:
+        normalizeVaultPath(this.settings.paraProjectsRoot) ||
+        DEFAULT_PARA_ROOTS.project,
+      area:
+        normalizeVaultPath(this.settings.paraAreasRoot) ||
+        DEFAULT_PARA_ROOTS.area,
+      resource:
+        normalizeVaultPath(this.settings.paraResourcesRoot) ||
+        DEFAULT_PARA_ROOTS.resource,
+      archive:
+        normalizeVaultPath(this.settings.paraArchivesRoot) ||
+        DEFAULT_PARA_ROOTS.archive,
+    };
   }
 
   async recommendFolders(
@@ -950,7 +1013,12 @@ export default class FileOrganizer extends Plugin {
   ): Promise<FolderSuggestion[]> {
     const customInstructions = this.settings.customFolderInstructions;
     const cutoff = this.settings.contentCutoffChars;
-    const cacheKey = buildSuggestionCacheKey(fileName, content, cutoff);
+    const roots = this.getParaRoots();
+    const cacheKey = `${buildSuggestionCacheKey(
+      fileName,
+      content,
+      cutoff
+    )}:${JSON.stringify(roots)}`;
 
     if (!options?.forceRefresh) {
       const cached = getCachedFolderSuggestions(cacheKey);
@@ -960,9 +1028,20 @@ export default class FileOrganizer extends Plugin {
     }
 
     const trimmedContent = content.slice(0, cutoff);
+    const paraRoots = Object.values(roots).map(normalizeVaultPath);
+    const allFolders = this.getAllUserFolders();
+    const paraFolders = [
+      ...paraRoots,
+      ...allFolders.filter((folder) =>
+        paraRoots.some((root) => folder.startsWith(`${root}/`))
+      ),
+    ];
     const folders = prioritizeFoldersForAI(
-      this.getAllUserFolders(),
+      [...new Set(paraFolders)],
       fileName
+    );
+    const existingFolders = new Set(
+      this.app.vault.getAllFolders().map((folder) => folder.path)
     );
 
     try {
@@ -972,7 +1051,8 @@ export default class FileOrganizer extends Plugin {
           fileName,
           folders,
           customInstructions,
-          3
+          3,
+          roots
         ),
         { temperature: 0.1, maxTokens: 512, signal: options?.signal }
       );
@@ -985,12 +1065,30 @@ export default class FileOrganizer extends Plugin {
           (f) => f && typeof f.folder === "string" && f.folder.trim().length > 0
         )
         .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-        .map((folder) => ({
-          score: typeof folder.score === "number" ? folder.score : 80,
-          isNewFolder: Boolean(folder.isNewFolder),
-          folder: folder.folder.trim(),
-          reason: folder.reason || "Matches note topic",
-        }));
+        .map((folder) => {
+          const candidate = normalizeVaultPath(folder.folder);
+          const candidateCategory = getParaCategoryForPath(candidate, roots);
+          const paraCategory = PARA_CATEGORIES.includes(folder.paraCategory)
+            ? folder.paraCategory
+            : candidateCategory ?? "resource";
+          const root = normalizeVaultPath(roots[paraCategory]);
+          const destination =
+            candidateCategory === paraCategory
+              ? candidate
+              : candidate &&
+                !getParaCategoryForPath(candidate, roots) &&
+                !candidate.includes("/")
+              ? `${root}/${candidate}`
+              : root;
+          return {
+            score: typeof folder.score === "number" ? folder.score : 80,
+            isNewFolder: !existingFolders.has(destination),
+            paraCategory,
+            folder: destination,
+            reason: folder.reason || `PARA ${paraCategory} destination`,
+          };
+        })
+        .filter((folder) => folder.folder.length > 0);
 
       setCachedFolderSuggestions(cacheKey, sortedFolders);
       return sortedFolders;
@@ -1002,7 +1100,9 @@ export default class FileOrganizer extends Plugin {
 
   async appendTag(file: TFile, tag: string) {
     // Ensure the tag starts with a hash symbol
-    const formattedTag = sanitizeTag(tag);
+    const tagName = normalizeVaultTag(sanitizeTag(tag));
+    if (!tagName) return;
+    const formattedTag = `#${tagName}`;
 
     // Get the file content and metadata
     const fileContent = await this.app.vault.read(file);
@@ -1010,27 +1110,34 @@ export default class FileOrganizer extends Plugin {
 
     // Check if tag exists in frontmatter
     const rawFrontmatterTags: unknown = metadata?.frontmatter?.tags;
-    const tagName = formattedTag.replace("#", "");
-    const hasFrontmatterTag =
-      Array.isArray(rawFrontmatterTags) &&
-      rawFrontmatterTags.some(
-        (t): t is string => typeof t === "string" && t === tagName
-      );
+    const frontmatterTags = Array.isArray(rawFrontmatterTags)
+      ? rawFrontmatterTags
+      : typeof rawFrontmatterTags === "string"
+      ? [rawFrontmatterTags]
+      : [];
+    const hasFrontmatterTag = frontmatterTags.some(
+      (value): value is string =>
+        typeof value === "string" && normalizeVaultTag(value) === tagName
+    );
 
     // Check if tag exists in content (for inline tags)
     const hasInlineTag = fileContent.includes(formattedTag);
 
     // If tag already exists, skip adding it
-    if (hasFrontmatterTag || hasInlineTag) {
+    const isParaTag = tagName.startsWith("para/");
+    if (hasFrontmatterTag || (hasInlineTag && !isParaTag)) {
       return;
     }
 
     // Append similar tags
-    if (this.settings.useSimilarTagsInFrontmatter) {
+    if (
+      this.settings.useSimilarTagsInFrontmatter ||
+      isParaTag
+    ) {
       await this.appendToFrontMatter(
         file,
         "tags",
-        formattedTag.replace("#", "")
+        tagName
       );
       return;
     }
@@ -1084,6 +1191,11 @@ export default class FileOrganizer extends Plugin {
     this.app.workspace.onLayoutReady(() => {
       registerEventHandlers(this);
       void this.maybeShowOnboarding();
+      void this.localAI.initialize().catch((error) => {
+        logger.error("First-run local AI initialization failed:", error);
+        const message = error instanceof Error ? error.message : String(error);
+        new Notice(`Local AI initialization failed: ${message}`, 7000);
+      });
     });
     if (this.settings.useInbox) {
       void this.processBacklog();
@@ -1264,13 +1376,16 @@ export default class FileOrganizer extends Plugin {
       id: "test-screenpipe",
       name: "Test screenpipe connection",
       callback: async () => {
-        const { ScreenpipeClient } = await import("./services/screenpipe-client");
-        const client = new ScreenpipeClient(this.settings.screenpipeApiUrl);
+        const {
+          ScreenpipeClient,
+          DEFAULT_SCREENPIPE_API_URL,
+        } = await import("./services/screenpipe-client");
+        const client = new ScreenpipeClient();
 
         const isAvailable = await client.isAvailable();
         if (!isAvailable) {
           new Notice(
-            "❌ ScreenPipe not available on " + this.settings.screenpipeApiUrl,
+            "❌ ScreenPipe not available on " + DEFAULT_SCREENPIPE_API_URL,
             5000
           );
           return;
@@ -1301,13 +1416,16 @@ export default class FileOrganizer extends Plugin {
           return;
         }
 
-        const { ScreenpipeClient } = await import("./services/screenpipe-client");
-        const client = new ScreenpipeClient(this.settings.screenpipeApiUrl);
+        const {
+          ScreenpipeClient,
+          DEFAULT_SCREENPIPE_API_URL,
+        } = await import("./services/screenpipe-client");
+        const client = new ScreenpipeClient();
 
         const isAvailable = await client.isAvailable();
         if (!isAvailable) {
           new Notice(
-            "❌ ScreenPipe not available on " + this.settings.screenpipeApiUrl,
+            "❌ ScreenPipe not available on " + DEFAULT_SCREENPIPE_API_URL,
             5000
           );
           return;
