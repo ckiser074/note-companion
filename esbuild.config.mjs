@@ -14,21 +14,11 @@ if you want to view the source, please visit the github repository of this plugi
 `;
 
 const prod = process.argv[2] === "production";
-const isGithubAction = process.env.GITHUB_ACTIONS === "true";
 
 const pluginDir = path.dirname(fileURLToPath(import.meta.url));
 process.chdir(pluginDir);
 
-// Determine output directory based on environment (absolute paths — build may run from repo root)
-const outdir = isGithubAction
-  ? path.join(pluginDir, "dist")
-  : path.join(pluginDir, "../..");
-
-/** Local Obsidian dev vault — `pnpm dev` copies artifacts here after each build. */
-const devVaultPluginDir = path.join(
-  pluginDir,
-  "../../demo-vault/.obsidian/plugins/fileorganizer2000"
-);
+const outdir = pluginDir;
 
 function copyWllamaWasm(outputDir) {
 	const wllamaPkgDir = path.dirname(
@@ -41,33 +31,6 @@ function copyWllamaWasm(outputDir) {
 	const outWasmDir = path.join(outputDir, "wasm");
 	fs.mkdirSync(outWasmDir, { recursive: true });
 	fs.copyFileSync(wasmSrc, path.join(outWasmDir, "wllama.wasm"));
-
-	if (!isGithubAction && !prod && fs.existsSync(devVaultPluginDir)) {
-		const devWasmDir = path.join(devVaultPluginDir, "wasm");
-		fs.mkdirSync(devWasmDir, { recursive: true });
-		fs.copyFileSync(wasmSrc, path.join(devWasmDir, "wllama.wasm"));
-	}
-}
-
-function copyDevBuildToDemoVault(outputDir) {
-  if (isGithubAction || prod) {
-    return;
-  }
-  if (!fs.existsSync(devVaultPluginDir)) {
-    return;
-  }
-  for (const file of ["main.js", "styles.css"]) {
-    const src = path.join(outputDir, file);
-    if (!fs.existsSync(src)) {
-      continue;
-    }
-    fs.copyFileSync(src, path.join(devVaultPluginDir, file));
-  }
-  const manifestSrc = path.join(outputDir, "manifest.json");
-  if (fs.existsSync(manifestSrc)) {
-    fs.copyFileSync(manifestSrc, path.join(devVaultPluginDir, "manifest.json"));
-  }
-  console.log(`[dev] Copied plugin build to ${devVaultPluginDir}`);
 }
 const requireFromPlugin = createRequire(path.join(pluginDir, "package.json"));
 const reactDir = path.dirname(requireFromPlugin.resolve("react/package.json"));
@@ -114,7 +77,6 @@ function postProcessCss(outputDir) {
 		fs.copyFileSync(stylesPath, mainPath);
 	}
 	copyWllamaWasm(resolvedDir);
-	copyDevBuildToDemoVault(resolvedDir);
 }
 
 const context = await esbuild.context({
@@ -123,7 +85,7 @@ const context = await esbuild.context({
 	},
 	entryPoints: {
 		main: path.join(pluginDir, "index.ts"),
-		styles: path.join(pluginDir, "styles.css"),
+		styles: path.join(pluginDir, "plugin-styles.css"),
 	},
 	bundle: true,
 	external: [

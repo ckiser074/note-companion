@@ -119,7 +119,7 @@ export function buildLocalChatMessages(
     ? contextString.slice(0, maxContextChars)
     : "";
 
-  const systemPrompt = `You are Note Companion running 100% locally offline on the user's computer inside Obsidian.
+  const systemPrompt = `You are PARA Companion, an offline AI assistant running locally on the user's computer inside Obsidian.
 Help the user organize, search, tag, rename, move, and edit their notes concisely and accurately.
 
 Available Vault Tools:

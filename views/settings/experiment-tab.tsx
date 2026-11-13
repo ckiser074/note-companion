@@ -53,7 +53,7 @@ export const ExperimentTab: React.FC<ExperimentTabProps> = ({ plugin }) => {
     <div className="experiment-settings p-4 space-y-8">
       <div className="mb-8">
         <p className="text-[--text-muted] mb-4">
-          These experimental features enhance your Note Companion workflow
+          These experimental features enhance your PARA Companion workflow
           locally on your device.
         </p>
       </div>

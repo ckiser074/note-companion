@@ -1,18 +1,16 @@
 {
-  "name": "@file-organizer/plugin",
-  "version": "3.6.43",
-  "description": "Note Companion",
+  "name": "para-companion",
+  "version": "0.1.0",
+  "description": "Offline, local-CPU AI assistant for organizing Obsidian vaults using the PARA method.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
     "new-version": "node version-bump.mjs && git add manifest.json versions.json",
     "test": "jest",
-    "test:watch": "jest --watch",
-    "release": "node release.js",
-    "lint": "pnpm --dir ../.. run lint"
+    "test:watch": "jest --watch"
   },
-  "author": "",
+  "author": "Vibcoded by ckiser074, forked from Nexus-JPF/note-companion",
   "license": "MIT",
   "devDependencies": {
     "@jest/globals": "^29.7.0",

@@ -358,7 +358,7 @@ export const FileConfigTab: React.FC<FileConfigTabProps> = ({ plugin }) => {
     <div className="file-config-settings">
       <div className="mb-8">
         <p className="text-[--text-muted] mb-4">
-          Configure which folders File Organizer can manage and monitor. This
+          Configure which folders PARA Companion can manage and monitor. This
           helps you:
         </p>
         <ul className="list-disc pl-6 text-[--text-muted] space-y-1 mb-6">
@@ -404,7 +404,7 @@ export const FileConfigTab: React.FC<FileConfigTabProps> = ({ plugin }) => {
           "attachmentsPath"
         )}
         {renderSettingItem(
-          "File Organizer log folder",
+          "PARA Companion log folder",
           "Choose a folder for Organization Logs e.g. Ava/Logs.",
           logFolderPath,
           e => {

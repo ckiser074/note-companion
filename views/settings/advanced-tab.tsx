@@ -43,8 +43,8 @@ export const AdvancedTab: React.FC<AdvancedTabProps> = ({ plugin }) => {
       />
 
       <ToggleSetting
-        name="Note Companion File Logs"
-        description="Allows you to keep track of the changes made by File Organizer."
+        name="PARA Companion File Logs"
+        description="Keep track of the changes made by PARA Companion."
         value={useLogs}
         onChange={(value) => {
           setUseLogs(value);

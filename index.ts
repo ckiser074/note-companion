@@ -1,4 +1,4 @@
-import "./styles.css";
+import "./plugin-styles.css";
 
 // esbuild shims for node globals used at build time
 interface ProcessEnv {
@@ -839,7 +839,7 @@ export default class FileOrganizer extends Plugin {
     Inbox.getInstance().enqueueFiles(pendingFiles);
     if (pendingFiles.length > 0) {
       new Notice(
-        `Note Companion: Processing ${pendingFiles.length} file(s) from inbox`
+        `PARA Companion: Processing ${pendingFiles.length} file(s) from inbox`
       );
     }
     return;

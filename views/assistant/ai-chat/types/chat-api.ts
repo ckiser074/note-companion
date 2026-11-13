@@ -209,7 +209,7 @@ export function toToolInvocation(
   return base;
 }
 
-export type NoteCompanionUseChatOptions = {
+export type ParaCompanionUseChatOptions = {
   onDataChunk?: (chunk: DataChunk) => void;
   experimental_prepareRequestBody?: (options: {
     id: string;

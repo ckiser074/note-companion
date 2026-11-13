@@ -8,4 +8,4 @@ data.json
 
 # Build artifacts
 .turbo
-*.tsbuildinfo  
+*.tsbuildinfo

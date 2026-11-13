@@ -20,8 +20,8 @@ jest.mock("obsidian", () => ({
 }));
 
 import {
-  getNoteCompanionSettingDefinitions,
-  type NoteCompanionSettingDefinition,
+  getParaCompanionSettingDefinitions,
+  type ParaCompanionSettingDefinition,
 } from "./setting-definitions";
 
 /** In the React screens but not yet in the declarative UI. */
@@ -58,7 +58,7 @@ function extractReactSettingKeys(source: string): string[] {
 }
 
 function collectDefinitionKeys(
-  definitions: NoteCompanionSettingDefinition[],
+  definitions: ParaCompanionSettingDefinition[],
   into = new Set<string>()
 ): Set<string> {
   for (const definition of definitions) {
@@ -70,7 +70,7 @@ function collectDefinitionKeys(
 }
 
 function collectNames(
-  definitions: NoteCompanionSettingDefinition[],
+  definitions: ParaCompanionSettingDefinition[],
   into = new Set<string>()
 ): Set<string> {
   for (const definition of definitions) {
@@ -80,7 +80,7 @@ function collectNames(
   return into;
 }
 
-const definitions = getNoteCompanionSettingDefinitions({
+const definitions = getParaCompanionSettingDefinitions({
   settings: {},
   app: { vault: { getAbstractFileByPath: () => null } },
 } as never);

@@ -5,7 +5,7 @@ import { createRoot, Root } from 'react-dom/client';
 import { SettingsTabContent } from './main';
 import { logMessage } from '../../someUtils';
 import {
-  getNoteCompanionSettingDefinitions,
+  getParaCompanionSettingDefinitions,
 } from './setting-definitions';
 
 export class FileOrganizerSettingTab extends PluginSettingTab {
@@ -23,7 +23,7 @@ export class FileOrganizerSettingTab extends PluginSettingTab {
    * display() remains for Obsidian versions before 1.13 (minAppVersion 1.8.7).
    */
   getSettingDefinitions(): SettingDefinitionItem[] {
-    return getNoteCompanionSettingDefinitions(
+    return getParaCompanionSettingDefinitions(
       this.plugin
     ) as unknown as SettingDefinitionItem[];
   }

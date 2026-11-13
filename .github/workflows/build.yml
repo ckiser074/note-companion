@@ -1,67 +1,33 @@
-name: Build Obsidian Plugin
+name: Build and test PARA Companion
 
 on:
   push:
-    branches: [master, main]
+    branches: [main, master]
   pull_request:
-    branches: [master, main]
-  workflow_dispatch: # Allow manual triggering from GitHub UI
+    branches: [main, master]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  build:
+  plugin:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v7
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 10.8.1
 
       - name: Use Node.js
         uses: actions/setup-node@v7
         with:
           node-version: "24.x"
-          cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install
+        run: npm install
 
-      # Each package is its own step so a failure in any of them fails the job.
-      # (They used to share one script of `cd x && build && cd ..` lists, where a
-      # failing build did not stop the script and later builds were skipped.)
+      - name: Test plugin
+        run: npm test -- --runInBand
 
       - name: Build plugin
-        working-directory: packages/plugin
-        run: pnpm build
-
-      - name: Build web (type-check and production build, without database migrations)
-        working-directory: packages/web
-        env:
-          NODE_OPTIONS: "--max-old-space-size=4096"
-          # The layout only mounts <ClerkProvider> when user management is on and a
-          # Clerk key is present, and /onboarding cannot be prerendered without it.
-          # These are placeholders, not secrets: nothing contacts Clerk during the build.
-          ENABLE_USER_MANAGEMENT: "true"
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_ZXhhbXBsZS5jbGVyay5hY2NvdW50cy5kZXYk
-          CLERK_SECRET_KEY: sk_test_placeholder_for_ci_build_only
-        run: pnpm build:ci
-
-      - name: Test ffmpeg tracing config (web)
-        working-directory: packages/web
-        run: pnpm exec jest lib/audio/tracing-config.test.ts
-
-      - name: Build landing
-        working-directory: packages/landing
-        env:
-          NODE_OPTIONS: "--max-old-space-size=4096"
-        run: pnpm build
-
-      - name: Build release-notes
-        working-directory: packages/release-notes
-        run: pnpm build
+        run: npm run build

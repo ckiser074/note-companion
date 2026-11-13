@@ -308,7 +308,7 @@ export const AssistantView: React.FC<AssistantViewProps> = ({
           <RefreshButton onRefresh={refreshContext} />
         </div>
         <div className={tw("px-3")}>
-          <EmptyState message="To process an image or audio file, move it to the Note Companion Inbox Folder (e.g. for image text extraction or audio transcription)." />
+          <EmptyState message="To process an image or audio file, move it to the PARA Companion Inbox folder (e.g. for image text extraction or audio transcription)." />
         </div>
       </div>
     );

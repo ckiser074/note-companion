@@ -179,7 +179,7 @@ export class ModelDownloader {
         parsedUrl,
         {
           headers: {
-            "User-Agent": "Obsidian-NoteCompanion-LocalAI/1.0",
+            "User-Agent": "Obsidian-PARA-Companion-LocalAI/1.0",
           },
         },
         (res) => {

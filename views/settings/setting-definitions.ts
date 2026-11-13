@@ -14,7 +14,7 @@ type SettingControl = {
   [option: string]: unknown;
 };
 
-export type NoteCompanionSettingDefinition = {
+export type ParaCompanionSettingDefinition = {
   name?: string;
   desc?: string;
   aliases?: string[];
@@ -24,12 +24,12 @@ export type NoteCompanionSettingDefinition = {
   visible?: () => boolean;
   type?: "group" | "page" | "list";
   heading?: string;
-  items?: NoteCompanionSettingDefinition[];
+  items?: ParaCompanionSettingDefinition[];
 };
 
-export function getNoteCompanionSettingDefinitions(
+export function getParaCompanionSettingDefinitions(
   plugin: FileOrganizer
-): NoteCompanionSettingDefinition[] {
+): ParaCompanionSettingDefinition[] {
   const settings = plugin.settings;
   const maxThreads =
     typeof navigator !== "undefined" && navigator.hardwareConcurrency
@@ -355,7 +355,7 @@ export function getNoteCompanionSettingDefinitions(
           control: { type: "toggle", key: "enableBackupCreation" },
         },
         {
-          name: "Note Companion file logs",
+          name: "PARA Companion file logs",
           control: { type: "toggle", key: "useLogs" },
         },
         {

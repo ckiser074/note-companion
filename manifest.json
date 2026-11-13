@@ -1,9 +1,10 @@
 {
-  "id": "fileorganizer2000",
-  "name": "Note Companion",
-  "version": "3.6.43",
+  "id": "para-companion",
+  "name": "PARA Companion",
+  "version": "0.1.0",
   "minAppVersion": "1.8.7",
-  "description": "100% offline, local CPU AI-powered note organization, tagging, moving, and chat using Qwen3-1.7B via embedded WebAssembly.",
-  "author": "Benjamin Ashgan Shafii",
+  "description": "Offline, local-CPU AI assistant for organizing Obsidian vaults using the PARA method.",
+  "author": "Vibcoded by ckiser074, forked from Nexus-JPF/note-companion",
+  "authorUrl": "https://github.com",
   "isDesktopOnly": true
 }

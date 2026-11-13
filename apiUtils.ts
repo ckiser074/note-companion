@@ -12,7 +12,7 @@ export async function makeApiRequest<T = unknown>(
   }
   const apiError = getApiError(response.json);
   if (apiError) {
-    new Notice(`File Organizer error: ${apiError}`, 6000);
+    new Notice(`PARA Companion error: ${apiError}`, 6000);
     throw new Error(apiError);
   }
   throw new Error("Unknown error");

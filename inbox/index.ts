@@ -287,7 +287,7 @@ export class Inbox {
           )
         ) {
           new Notice(
-            `Note Companion: Processing failed for ${file.basename}. ${error.message}`,
+            `PARA Companion: Processing failed for ${file.basename}. ${error.message}`,
             6000
           );
         }

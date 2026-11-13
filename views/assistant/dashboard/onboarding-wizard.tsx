@@ -109,10 +109,10 @@ export function OnboardingWizard({ plugin, onComplete }: OnboardingWizardProps) 
                 "text-[--font-ui-smaller] font-semibold text-[--text-muted] uppercase"
               )}
             >
-              Welcome to Note Companion (Local Offline Edition)
+              Welcome to PARA Companion
             </div>
             <p className={tw("m-0")}>
-              Drop notes in your Inbox and Note Companion files, tags, renames,
+              Drop notes in your Inbox and PARA Companion files, tags, renames,
               and formats them 100% locally on your CPU.
             </p>
             <ul className={tw("list-disc pl-5 space-y-1 m-0")}>
@@ -150,7 +150,7 @@ export function OnboardingWizard({ plugin, onComplete }: OnboardingWizardProps) 
               Initialize Local AI Engine
             </div>
             <p className={tw("m-0 text-sm")}>
-              Note Companion uses <strong>Qwen3-1.7B (Q4_K_M GGUF)</strong>{" "}
+              PARA Companion uses <strong>Qwen3-1.7B (Q4_K_M GGUF)</strong>{" "}
               inside a dedicated WebAssembly CPU worker. On first setup it
               downloads ~1.1 GB into your plugin folder so everything runs
               completely offline afterward.
@@ -266,7 +266,7 @@ export function OnboardingWizard({ plugin, onComplete }: OnboardingWizardProps) 
             </div>
             <p className={tw("m-0")}>
               Local AI is ready. We&apos;ll add a short sample note to your Inbox
-              so you can watch Note Companion organize it offline.
+              so you can watch PARA Companion organize it offline.
             </p>
             <div
               className={tw(

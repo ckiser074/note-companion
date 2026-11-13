@@ -56,7 +56,7 @@ describe("apiUtils", () => {
 
       await expect(makeApiRequest(requestFn)).rejects.toThrow("Request failed");
       expect(Notice).toHaveBeenCalledWith(
-        "File Organizer error: Request failed",
+        "PARA Companion error: Request failed",
         6000
       );
     });
