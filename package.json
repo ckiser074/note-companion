@@ -1,1 +1,10 @@
-{"name":"file-organizer-2000-monorepo","private":true,"engines":{"node":"24.x"},"devDependencies":{"@ai-sdk/anthropic":"^1.0.6","@eslint/js":"^9.39.4","@types/node":"^22.13.10","eslint":"^9.39.4","eslint-plugin-obsidianmd":"^0.3.0","globals":"^17.6.0","node-gyp":"^11.1.0","stylelint":"^16.26.1","turbo":"^2.4.4","typescript":"^5.8.2","typescript-eslint":"^8.59.1"},"overrides":{"zod":"^3.25.76","fast-xml-parser":"^4.5.4","picomatch":"^2.3.2","lodash":"^4.17.23","minimatch@3":"^3.1.3","minimatch@8":"^8.0.5","minimatch@9":"^9.0.6","brace-expansion@1":"^1.1.12","brace-expansion@2":"^2.0.2","flatted":"^3.4.0","qs":"^6.14.2","csstype":"^3.2.3"},"version":"1.0.0","scripts":{"build":"node packages/plugin/esbuild.config.mjs production","build:all":"turbo build","dev":"turbo dev","lint":"eslint .","lint:plugin":"eslint packages/plugin","lint:obsidian-scan":"OBSIDIAN_SCAN\u003d1 eslint packages/plugin","lint:css":"stylelint \"**/*.css\" --ignore-path .stylelintignore --allow-empty-input","lint:monorepo":"turbo lint","test":"turbo test","clean":"git clean -xdf node_modules","android":"expo run:android","ios":"expo run:ios"},"pnpm":{"patchedDependencies":{"xcode@3.0.1":"patches/xcode@3.0.1.patch","@clerk/expo@4.2.6":"patches/@clerk__expo@4.2.6.patch"},"overrides":{"@types/react":"19.1.17","@types/react-dom":"19.1.7","@types/react@^19.0.0":"19.1.17","@types/react-dom@^19.0.0":"19.1.7","eas-cli\u003ezod":"^4.1.5","@expo/eas-build-job\u003ezod":"^4.4.3","@expo/eas-json\u003ezod":"^4.4.3","@expo/steps\u003ezod":"^4.4.3","zod":"^3.25.76","fast-xml-parser":"^4.5.4","picomatch":"^2.3.2","lodash":"^4.17.23","minimatch@3":"^3.1.3","minimatch@8":"^8.0.5","minimatch@9":"^9.0.6","brace-expansion@1":"^1.1.12","brace-expansion@2":"^2.0.2","flatted":"^3.4.0","qs":"^6.14.2","csstype":"^3.2.3"},"onlyBuiltDependencies":["@ffprobe-installer/darwin-arm64","@ffprobe-installer/linux-x64","ffmpeg-static"]}}
+{
+  "name": "file-organizer-2000-plugin",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "npx --yes serve -l 3000 .",
+    "build": "node packages/plugin/esbuild.config.mjs production",
+    "postinstall": "bun install --cwd packages/plugin"
+  }
+}

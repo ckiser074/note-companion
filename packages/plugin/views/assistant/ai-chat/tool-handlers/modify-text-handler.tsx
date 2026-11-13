@@ -2,12 +2,7 @@ import React, { useRef, useState } from "react";
 import { TFile, Editor } from "obsidian";
 import { logger } from "../../../../services/logger";
 import { usePlugin } from "../../provider";
-import { obsidianFetch } from "../../../../lib/obsidian-fetch";
-import {
-  readResponseJson,
-  getApiError,
-  type ApiErrorBody,
-} from "../../../../lib/api-json";
+import { buildModifyMessages } from "../../../../ai/chatml";
 import { ToolHandlerProps } from "./types";
 
 interface ModifyTextArgs {
@@ -22,10 +17,63 @@ interface DiffLine {
   removed?: boolean;
 }
 
-interface ModifyResponse {
+interface LocalModifyResult {
   content: string;
-  diff: DiffLine[];
-  explanation: string;
+  explanation?: string;
+}
+
+function computeLineDiff(before: string, after: string): DiffLine[] {
+  const a = before.split("\n");
+  const b = after.split("\n");
+  const m = a.length;
+  const n = b.length;
+
+  // Guard huge inputs against O(m*n) memory; fall back to block replace diff
+  if (m * n > 250_000) {
+    return [
+      ...a.map((value) => ({ value, removed: true })),
+      ...b.map((value) => ({ value, added: true })),
+    ];
+  }
+
+  const dp: number[][] = Array.from({ length: m + 1 }, () =>
+    new Array<number>(n + 1).fill(0)
+  );
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      if (a[i] === b[j]) {
+        dp[i][j] = 1 + dp[i + 1][j + 1];
+      } else {
+        dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+  }
+
+  const result: DiffLine[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < m && j < n) {
+    if (a[i] === b[j]) {
+      result.push({ value: a[i] });
+      i++;
+      j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      result.push({ value: a[i], removed: true });
+      i++;
+    } else {
+      result.push({ value: b[j], added: true });
+      j++;
+    }
+  }
+  while (i < m) {
+    result.push({ value: a[i], removed: true });
+    i++;
+  }
+  while (j < n) {
+    result.push({ value: b[j], added: true });
+    j++;
+  }
+  return result;
 }
 
 export function ModifyTextHandler({
@@ -50,7 +98,7 @@ export function ModifyTextHandler({
       if (!hasFetchedRef.current && !("result" in toolInvocation)) {
         hasFetchedRef.current = true;
         const { content, path, instructions } =
-          toolInvocation.args as ModifyTextArgs;
+          toolInvocation.args as unknown as ModifyTextArgs;
         try {
           let targetFile: TFile;
           let originalContent: string;
@@ -70,33 +118,19 @@ export function ModifyTextHandler({
           }
 
           originalContent = await app.vault.read(targetFile);
+          const targetText = content || originalContent;
 
-          const response = await obsidianFetch(
-            `${plugin.getServerUrl()}/api/modify`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${plugin.getApiKey()}`,
-              },
-              body: JSON.stringify({
-                content,
-                originalContent,
-                instructions,
-              }),
-            }
+          const data = await plugin.localAI.generateJSON<LocalModifyResult>(
+            buildModifyMessages(targetText, instructions, originalContent),
+            { temperature: 0.1, maxTokens: 1536 }
           );
 
-          if (!response.ok) {
-            const errorData = await readResponseJson<ApiErrorBody>(response);
-            throw new Error(
-              getApiError(errorData) ?? "Failed to generate modification"
-            );
+          if (!data || typeof data.content !== "string") {
+            throw new Error("Local AI did not return modified content");
           }
 
-          const data = await readResponseJson<ModifyResponse>(response);
-          setDiff(data.diff);
-          setExplanation(data.explanation);
+          setDiff(computeLineDiff(targetText, data.content));
+          setExplanation(data.explanation || "Proposed local edit");
 
           const editor = app.workspace.activeEditor?.editor;
           setPendingChanges({

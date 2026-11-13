@@ -1,20 +1,44 @@
 import React, { useRef, useState } from "react";
+import { requestUrl } from "obsidian";
 import { logger } from "../../../../services/logger";
-import { usePlugin } from "../../provider";
 import { ToolInvocation } from "./types";
-import { readResponseJson } from "../../../../lib/api-json";
-import { obsidianFetch } from "../../../../lib/obsidian-fetch";
 
 interface UrlFetchHandlerProps {
   toolInvocation: ToolInvocation;
   handleAddResult: (result: string) => void;
 }
 
+function htmlToPlainText(html: string): { title: string; content: string } {
+  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const title = titleMatch ? titleMatch[1].replace(/\s+/g, " ").trim() : "";
+
+  const stripped = html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<\/(p|div|li|h[1-6]|tr|br|section|article)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+
+  return {
+    title,
+    content: stripped.slice(0, 12000),
+  };
+}
+
 export function UrlFetchHandler({
   toolInvocation,
   handleAddResult,
 }: UrlFetchHandlerProps) {
-  const plugin = usePlugin();
   const hasFetchedRef = useRef(false);
   const [status, setStatus] = useState<"loading" | "success" | "error">(
     "loading"
@@ -61,61 +85,42 @@ export function UrlFetchHandler({
       }
 
       try {
-        const apiKey = plugin.getApiKey()?.trim();
-        if (!apiKey) {
+        const response = await requestUrl({
+          url,
+          method: "GET",
+          throw: false,
+        });
+
+        if (response.status >= 400) {
           handleAddResult(
             JSON.stringify({
-              error: "API key is missing; cannot fetch URL",
+              error: `Request failed with status ${response.status}`,
             })
           );
           setStatus("error");
           return;
         }
 
-        const response = await obsidianFetch(
-          `${plugin.getServerUrl()}/api/fetch-url`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({ url }),
-          }
-        );
-
-        const data = await readResponseJson<{
-          title?: string;
-          content?: string;
-          url?: string;
-          error?: string;
-        }>(response);
-
-        if (!response.ok) {
-          const msg =
-            data.error ||
-            `Request failed with status ${response.status}`;
-          handleAddResult(JSON.stringify({ error: msg }));
-          setStatus("error");
-          return;
-        }
-
-        if (!data.content || typeof data.content !== "string") {
+        const rawText = response.text || "";
+        if (!rawText.trim()) {
           handleAddResult(
-            JSON.stringify({
-              error: "Server returned no page content",
-            })
+            JSON.stringify({ error: "Fetched page returned empty content" })
           );
           setStatus("error");
           return;
         }
 
-        const titleLine = data.title
-          ? `Page title: ${data.title}\n`
+        const isHtml =
+          /<html[\s>]/i.test(rawText) || /<body[\s>]/i.test(rawText);
+        const extracted = isHtml
+          ? htmlToPlainText(rawText)
+          : { title: "", content: rawText.slice(0, 12000).trim() };
+
+        const titleLine = extracted.title
+          ? `Page title: ${extracted.title}\n`
           : "";
-        const sourceLine = data.url ? `Source URL: ${data.url}\n\n` : "";
-
-        const toolResult = `${titleLine}${sourceLine}Page content (plain text):\n\n${data.content}\n\nUse the content above to answer the user's question or provide the summary they asked for.`;
+        const sourceLine = `Source URL: ${url}\n\n`;
+        const toolResult = `${titleLine}${sourceLine}Page content (plain text):\n\n${extracted.content}\n\nUse the content above to answer the user's question or provide the summary they asked for.`;
 
         handleAddResult(toolResult);
         setStatus("success");

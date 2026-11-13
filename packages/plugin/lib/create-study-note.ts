@@ -45,8 +45,6 @@ export async function createStudyNote(
   const generated = await plugin.formatStream(
     source,
     instructions,
-    plugin.getServerUrl(),
-    settings.API_KEY,
     () => {}
   );
   const content = plugin.cleanupTagsInContent(generated).trim();

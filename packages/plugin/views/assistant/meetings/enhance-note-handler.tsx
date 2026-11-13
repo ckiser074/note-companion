@@ -8,8 +8,6 @@ import { Notice } from "obsidian";
 import { logger } from "../../../services/logger";
 import { RecordingMetadata, MeetingMetadataManager } from "./meeting-metadata";
 import { TranscribeHandler } from "./transcribe-handler";
-import { obsidianFetch } from "../../../lib/obsidian-fetch";
-import { getApiError } from "../../../lib/api-json";
 import { showConfirmModal } from "../../../lib/show-confirm-modal";
 
 interface EnhanceNoteHandlerProps {
@@ -243,48 +241,23 @@ export const EnhanceNoteHandler: React.FC<EnhanceNoteHandlerProps> = ({
           })
         : null;
 
-      const response = await obsidianFetch(
-        `${plugin.getServerUrl()}/api/enhance-meeting-note`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${plugin.settings.API_KEY}`,
+      const recordingFileName =
+        recording.filePath.split("/").pop() || recording.filePath;
+
+      let enhancedContent = await plugin.localAI.streamGenerate(
+        [
+          {
+            role: "system",
+            content:
+              "You are an expert meeting note assistant. Combine the user's existing note (if any) and the meeting transcript into a well-structured Obsidian Markdown note with sections: ## Summary, ## Discussion Points, ## Action Items (as - [ ] tasks), and ## Full Transcript. Preserve user notes cleanly. Output ONLY Markdown.",
           },
-          body: JSON.stringify({
-            transcript,
-            currentNoteContent: cleanedNoteContent, // Use cleaned content without old recording section
-            fileName: activeFile.basename,
-            recordingDate,
-            recordingDuration: recording.duration,
-            recordingFileName:
-              recording.filePath.split("/").pop() || recording.filePath,
-            recordingFilePath: recording.filePath,
-          }),
-        }
+          {
+            role: "user",
+            content: `Note title: ${activeFile.basename}\nDate: ${recordingDate ?? "Unknown"}\nRecording: ${recordingFileName}\n\nExisting Note Content:\n"""\n${cleanedNoteContent.slice(0, 3000)}\n"""\n\nMeeting Transcript:\n"""\n${transcript.slice(0, 6000)}\n"""`,
+          },
+        ],
+        { temperature: 0.1, maxTokens: 1536, suppressThinking: true }
       );
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({})) as unknown;
-        throw new Error(getApiError(errorData) ?? "Enhancement failed");
-      }
-
-      // Handle streaming response
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let enhancedContent = "";
-
-      if (!reader) {
-        throw new Error("No response body");
-      }
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        enhancedContent += chunk;
-      }
 
       // Remove any "Recording:" or "Recordings:" sections that the API might have added
       // We'll add our own properly formatted section

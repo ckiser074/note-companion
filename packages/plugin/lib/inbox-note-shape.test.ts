@@ -75,7 +75,7 @@ describe("createStudyNote on a note built like the pipeline builds it", () => {
     const source = { path: "Research/Immunity.md", basename: "Immunity", parent: { path: "Research" } };
     const formatStream = jest.fn(async () => '---\ntotal: 1\n---\n\n<details class="flashcard"><summary>Q</summary>A</details>');
     const plugin = {
-      settings: { maxFormattingTokens: 100000, API_KEY: "k" },
+      settings: { maxFormattingTokens: 100000 },
       app: {
         vault: {
           read: async (f: { path: string }) => files.get(f.path),
@@ -89,7 +89,6 @@ describe("createStudyNote on a note built like the pipeline builds it", () => {
         },
       },
       getTemplateInstructions: async () => "make cards",
-      getServerUrl: () => "https://server",
       formatStream,
       cleanupTagsInContent: (c: string) => c,
     };

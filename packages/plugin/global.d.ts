@@ -17,6 +17,8 @@ declare global {
   interface Window {
     moment: (input?: number | string | Date) => ObsidianMoment;
   }
+  const __AI_WORKER_CODE__: string;
 }
 
 export {};
+

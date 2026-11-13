@@ -441,51 +441,6 @@ async function fetchYouTubeMetadata(videoId: string): Promise<YouTubeMetadata> {
   }
 }
 
-async function fetchYouTubeContentFromBackend(
-  videoId: string,
-  plugin: FileOrganizer
-): Promise<Omit<YouTubeFetchedContent, "videoId">> {
-  const apiKey = plugin.getApiKey()?.trim();
-  if (!apiKey) {
-    throw new YouTubeError(
-      "API key is missing; cannot fetch transcript from server"
-    );
-  }
-
-  const response = await obsidianFetch(
-    `${plugin.getServerUrl()}/api/youtube-transcript`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({ videoId }),
-    }
-  );
-
-  const data = await readResponseJson<{
-    title?: string;
-    transcript?: string;
-    error?: string;
-  }>(response);
-
-  if (!response.ok) {
-    throw new YouTubeError(
-      data.error || `Server transcript fetch failed (${response.status})`
-    );
-  }
-
-  if (!data.transcript || typeof data.transcript !== "string") {
-    throw new YouTubeError("Server returned no transcript");
-  }
-
-  return {
-    title: data.title || "Untitled YouTube Video",
-    transcript: data.transcript,
-  };
-}
-
 /**
  * Fetches YouTube content (title, transcript, channel, date published) directly from the client
  * Uses youtube-transcript-plus for reliable transcript fetching
@@ -493,7 +448,7 @@ async function fetchYouTubeContentFromBackend(
  */
 export async function getYouTubeContent(
   videoId: string,
-  plugin?: FileOrganizer
+  _plugin?: FileOrganizer
 ): Promise<Omit<YouTubeFetchedContent, "videoId">> {
   // Validate and normalize videoId to ensure it's a string
   if (!videoId) {
@@ -647,21 +602,6 @@ export async function getYouTubeContent(
               error instanceof Error ? error.message : "Unknown error"
             }`
           );
-
-    if (plugin) {
-      logger.warn(
-        "[YouTube Service] Client transcript fetch failed, trying backend API:",
-        clientError.message
-      );
-      try {
-        return await fetchYouTubeContentFromBackend(finalVideoId, plugin);
-      } catch (backendError) {
-        logger.error(
-          "[YouTube Service] Backend transcript fallback failed:",
-          backendError
-        );
-      }
-    }
 
     logger.error("[YouTube Service] Error fetching YouTube content:", error);
     throw clientError;

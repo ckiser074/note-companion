@@ -30,6 +30,25 @@ const devVaultPluginDir = path.join(
   "../../demo-vault/.obsidian/plugins/fileorganizer2000"
 );
 
+function copyWllamaWasm(outputDir) {
+	const wllamaPkgDir = path.dirname(
+		requireFromPlugin.resolve("@wllama/wllama/package.json")
+	);
+	const wasmSrc = path.join(wllamaPkgDir, "esm/wasm/wllama.wasm");
+	if (!fs.existsSync(wasmSrc)) {
+		throw new Error(`Missing wllama WASM binary at ${wasmSrc}`);
+	}
+	const outWasmDir = path.join(outputDir, "wasm");
+	fs.mkdirSync(outWasmDir, { recursive: true });
+	fs.copyFileSync(wasmSrc, path.join(outWasmDir, "wllama.wasm"));
+
+	if (!isGithubAction && !prod && fs.existsSync(devVaultPluginDir)) {
+		const devWasmDir = path.join(devVaultPluginDir, "wasm");
+		fs.mkdirSync(devWasmDir, { recursive: true });
+		fs.copyFileSync(wasmSrc, path.join(devWasmDir, "wllama.wasm"));
+	}
+}
+
 function copyDevBuildToDemoVault(outputDir) {
   if (isGithubAction || prod) {
     return;
@@ -61,6 +80,24 @@ const reactAliases = {
 	"react/jsx-dev-runtime": path.join(reactDir, "jsx-dev-runtime.js"),
 };
 
+async function buildAiWorkerCode() {
+	const result = await esbuild.build({
+		entryPoints: [path.join(pluginDir, "ai/ai-worker.ts")],
+		bundle: true,
+		write: false,
+		platform: "browser",
+		format: "iife",
+		target: "es2022",
+		minify: prod,
+		legalComments: "none",
+		treeShaking: true,
+		tsconfig: path.join(pluginDir, "tsconfig.json"),
+	});
+	return result.outputFiles[0].text;
+}
+
+const aiWorkerCode = await buildAiWorkerCode();
+
 const cssPostProcessPlugin = {
 	name: "css-post-process",
 	setup(build) {
@@ -76,6 +113,7 @@ function postProcessCss(outputDir) {
 	if (fs.existsSync(stylesPath)) {
 		fs.copyFileSync(stylesPath, mainPath);
 	}
+	copyWllamaWasm(resolvedDir);
 	copyDevBuildToDemoVault(resolvedDir);
 }
 
@@ -132,6 +170,7 @@ const context = await esbuild.context({
 	define: {
 		'process.env.NODE_ENV': prod ? '"production"' : '"development"',
 		'process.env.GITHUB_ACTIONS': JSON.stringify(process.env.GITHUB_ACTIONS || "false"),
+		'__AI_WORKER_CODE__': JSON.stringify(aiWorkerCode),
 	},
 	loader: {
 		'.ts': 'ts',

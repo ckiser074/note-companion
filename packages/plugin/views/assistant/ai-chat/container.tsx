@@ -15,14 +15,12 @@ import {
 
 interface AIChatSidebarProps {
   plugin: FileOrganizer;
-  apiKey: string;
   onTokenLimitError?: (error: string) => void;
   isChatTabActive?: boolean;
 }
 
 const AIChatSidebar: React.FC<AIChatSidebarProps> = ({
   plugin,
-  apiKey,
   onTokenLimitError,
   isChatTabActive,
 }) => {
@@ -208,7 +206,6 @@ const AIChatSidebar: React.FC<AIChatSidebarProps> = ({
       <div className="flex-1 min-h-0 w-full">
         <ChatComponent
           plugin={plugin}
-          apiKey={apiKey}
           inputRef={inputRef}
           onTokenLimitError={onTokenLimitError}
           activeChatId={activeChatId}

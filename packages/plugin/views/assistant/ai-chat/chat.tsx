@@ -27,22 +27,15 @@ import {
 } from "./message-renderer";
 import ToolInvocationHandler from "./tool-handlers/tool-invocation-handler";
 import {
-  convertToModelMessages,
-  DefaultChatTransport,
   lastAssistantMessageIsCompleteWithToolCalls,
-  stepCountIs,
-  streamText,
   type UIMessage,
 } from "ai";
-import { ollama } from "ollama-ai-provider-v2";
+import { LocalChatTransport } from "../../../ai/local-chat-transport";
 import { SourcesSection } from "./components/SourcesSection";
 import { ContextLimitIndicator } from "./context-limit-indicator";
 import { ModelSelector } from "./model-selector";
-import { ModelType } from "./types";
 import { AudioRecorder } from "./audio-recorder";
 import { logger } from "../../../services/logger";
-import { obsidianFetch, type ObsidianFetchInit } from "../../../lib/obsidian-fetch";
-import { parseRequestBodyJson } from "../../../lib/api-json";
 import {
   type ChatRequestBody,
   type YouTubeVideoSummary,
@@ -81,7 +74,6 @@ const getCurrentDatetime = () =>
 
 interface ChatComponentProps {
   plugin: FileOrganizer;
-  apiKey: string;
   inputRef: React.RefObject<HTMLDivElement>;
   onTokenLimitError?: (error: string) => void;
   activeChatId: string | null;
@@ -93,9 +85,7 @@ interface ChatComponentProps {
 }
 
 export const ChatComponent: React.FC<ChatComponentProps> = ({
-  apiKey,
   inputRef,
-  onTokenLimitError,
   activeChatId,
   onSessionUpdate,
   chatSessions = [],
@@ -123,13 +113,11 @@ export const ChatComponent: React.FC<ChatComponentProps> = ({
   // Context used by the most recent request (so onFinish can store it)
   const lastContextSentRef = useRef<string>("");
 
-  // If reload({ body }) is supported, this stages the exact body to use for reload
+  // If regenerate() is used, this stages the exact context to use
   interface ReloadBody {
     currentDatetime: string;
     model: string;
     newUnifiedContext: string;
-    enableChatWebSearch?: boolean;
-    /** Sent only when settings preference is not "auto"; server clamps to tier. */
     requestedMaxSteps?: number;
   }
   const forcedReloadBodyRef = useRef<ReloadBody | null>(null);
@@ -238,12 +226,7 @@ export const ChatComponent: React.FC<ChatComponentProps> = ({
   }, [contextItems, isLightweightMode]);
   logger.debug("contextString", contextString);
 
-  const [selectedModel, setSelectedModel] = useState<ModelType>(
-    plugin.settings.selectedModel
-  );
   const [input, setInput] = useState("");
-  const selectedModelRef = useRef(selectedModel);
-  selectedModelRef.current = selectedModel;
 
   // Format editor context for AI - MEMOIZED to prevent infinite loop
   const editorContextString = React.useMemo(
@@ -474,8 +457,7 @@ export const ChatComponent: React.FC<ChatComponentProps> = ({
         messages: requestMessages,
         currentDatetime: getCurrentDatetime(),
         newUnifiedContext: contextToSend,
-        model: plugin.settings.selectedModel,
-        enableChatWebSearch: plugin.settings.enableChatWebSearch,
+        model: plugin.settings.localModelId,
       };
       if (plugin.settings.chatMaxStepsPreference !== "auto") {
         requestBody.requestedMaxSteps = plugin.settings.chatMaxStepsPreference;
@@ -486,78 +468,33 @@ export const ChatComponent: React.FC<ChatComponentProps> = ({
     [plugin, app, editorContext]
   );
 
-  const chatFetch = useCallback(async (url: RequestInfo | URL, options?: RequestInit) => {
-      logMessage(plugin.settings.showLocalLLMInChat, "showLocalLLMInChat");
-      logMessage(selectedModelRef.current, "selectedModel");
-
-      // Handle different model types
-      if (!plugin.settings.showLocalLLMInChat || selectedModelRef.current === "gpt-4o-mini") {
-        return obsidianFetch(url, options as ObsidianFetchInit | undefined);
-      }
-
-      const { messages: localMessages, newUnifiedContext, currentDatetime: localDatetime } =
-        parseRequestBodyJson<{
-          messages: UIMessage[];
-          newUnifiedContext: string;
-          currentDatetime: string;
-        }>(options?.body);
-      logger.debug("local model context", {
-        model: selectedModelRef.current,
-        contextLength: newUnifiedContext.length,
-        contextPreview: newUnifiedContext.slice(0, 200),
-        messageCount: localMessages.length,
-      });
-      const localMaxSteps =
-        plugin.settings.chatMaxStepsPreference === "auto"
-          ? 5
-          : plugin.settings.chatMaxStepsPreference;
-      const result = streamText({
-        model: ollama(selectedModelRef.current),
-        system: `
-          ${newUnifiedContext},
-          currentDatetime: ${localDatetime},
-          `,
-        messages: convertToModelMessages(localMessages, {
-          ignoreIncompleteToolCalls: true,
-        }),
-        stopWhen: stepCountIs(localMaxSteps),
-      });
-
-      return result.toUIMessageStreamResponse();
-    }, [plugin]);
+  const localTransport = useMemo(() => new LocalChatTransport(plugin), [plugin]);
 
   const transport = useMemo(
-    () =>
-      new DefaultChatTransport({
-        api: `${plugin.getServerUrl()}/api/chat/v5`,
-        headers: () => {
-          const apiKey = plugin.getApiKey()?.trim();
-          const headers: Record<string, string> = {
-            "Content-Type": "application/json",
-          };
-          if (apiKey && apiKey.length > 0) {
-            headers.Authorization = `Bearer ${apiKey}`;
-          } else {
-            console.warn(
-              "[Chat] API key is missing or empty, requests will fail authentication"
-            );
-          }
-          return headers;
-        },
-        fetch: chatFetch,
-        prepareSendMessagesRequest: ({ messages: requestMessages, body }) => {
-          if (forcedReloadBodyRef.current) {
-            const forced = forcedReloadBodyRef.current;
-            forcedReloadBodyRef.current = null;
-            lastContextSentRef.current = forced.newUnifiedContext;
-            return { body: { messages: requestMessages, ...forced } };
-          }
-          const payload = buildChatRequestBody(requestMessages);
-          lastContextSentRef.current = payload.newUnifiedContext;
-          return { body: { ...payload, ...(body || {}) } };
-        },
-      }),
-    [plugin, buildChatRequestBody, chatFetch]
+    () => ({
+      sendMessages: async (
+        options: Parameters<LocalChatTransport["sendMessages"]>[0]
+      ) => {
+        let contextToSend: string;
+        if (forcedReloadBodyRef.current) {
+          const forced = forcedReloadBodyRef.current;
+          forcedReloadBodyRef.current = null;
+          contextToSend = forced.newUnifiedContext;
+        } else {
+          contextToSend = buildChatRequestBody(options.messages).newUnifiedContext;
+        }
+        lastContextSentRef.current = contextToSend;
+        return localTransport.sendMessages({
+          ...options,
+          body: {
+            ...(options.body || {}),
+            newUnifiedContext: contextToSend,
+          },
+        });
+      },
+      reconnectToStream: () => localTransport.reconnectToStream(),
+    }),
+    [localTransport, buildChatRequestBody]
   );
 
   const {
@@ -614,32 +551,6 @@ export const ChatComponent: React.FC<ChatComponentProps> = ({
     },
     onError: error => {
       logger.error("Chat error:", error);
-      logger.error("Error details:", {
-        message: error.message,
-        name: error.name,
-        stack: error.stack,
-      });
-
-      // Check for authentication errors
-      if (
-        error.message?.includes("Unauthorized") ||
-        error.message?.includes("401") ||
-        error.message?.includes("Authorization")
-      ) {
-        const apiKey = plugin.getApiKey()?.trim();
-        if (!apiKey || apiKey.length === 0) {
-          new Notice(
-            "Authentication failed: API key is missing. Please set your API key in plugin settings.",
-            5000
-          );
-        } else {
-          new Notice(
-            "Authentication failed: Invalid API key. Please check your API key in plugin settings.",
-            5000
-          );
-        }
-        return;
-      }
 
       // Check if this is a tool invocation error (non-fatal)
       const isToolError = error.message?.includes(
@@ -647,72 +558,12 @@ export const ChatComponent: React.FC<ChatComponentProps> = ({
       );
 
       if (isToolError) {
-        // Don't suppress tool errors - let them appear as messages
-        // Just log it and continue without blocking the UI
         logger.warn("Tool invocation error detected, displaying as message...");
         return;
       }
 
-      let userFriendlyMessage = "Something went wrong. Please try again.";
-
-      // Check error type first (more reliable than message content)
-      if (error.name === "TypeError" && error.message?.includes("fetch")) {
-        // This is a real network/fetch error
-        userFriendlyMessage =
-          "Connection failed. Please check your internet connection.";
-      } else if (error.message?.toLowerCase().includes("api key")) {
-        userFriendlyMessage =
-          "API key issue detected. Please check your settings.";
-      } else if (
-        error.message?.toLowerCase().includes("unauthorized") ||
-        error.message?.toLowerCase().includes("401")
-      ) {
-        userFriendlyMessage =
-          "Authentication failed. Please check your API key in settings.";
-      } else if (
-        error.message?.toLowerCase().includes("forbidden") ||
-        error.message?.toLowerCase().includes("403")
-      ) {
-        userFriendlyMessage =
-          "Access denied. Please check your subscription status.";
-      } else if (
-        error.message?.toLowerCase().includes("network") ||
-        error.message?.toLowerCase().includes("fetch")
-      ) {
-        userFriendlyMessage =
-          "Connection failed. Please check your internet connection.";
-      } else if (
-        error.message?.toLowerCase().includes("token limit exceeded") ||
-        error.message?.toLowerCase().includes("credits limit exceeded")
-      ) {
-        // Show the full error message for token limit - it includes usage details
-        userFriendlyMessage = error.message;
-        // Notify parent component to show upgrade button
-        onTokenLimitError?.(error.message);
-      } else if (
-        error.message?.toLowerCase().includes("rate limit") ||
-        error.message?.toLowerCase().includes("429")
-      ) {
-        userFriendlyMessage =
-          "Rate limit reached. Please wait a moment and try again.";
-      } else if (
-        error.message?.toLowerCase().includes("timeout") ||
-        error.message?.toLowerCase().includes("timed out")
-      ) {
-        userFriendlyMessage = "Request timed out. Please try again.";
-      } else if (
-        error.message?.toLowerCase().includes("500") ||
-        error.message?.toLowerCase().includes("internal server error")
-      ) {
-        userFriendlyMessage =
-          "Server error occurred. Please try again in a moment.";
-      } else if (error.message?.toLowerCase().includes("cors")) {
-        userFriendlyMessage =
-          "CORS error. Please check your server URL configuration.";
-      } else if (error.message) {
-        // If we have a specific error message, show it fully (don't truncate)
-        userFriendlyMessage = error.message;
-      }
+      const userFriendlyMessage =
+        error.message || "Local AI generation failed. Please try again.";
 
       setErrorMessage(userFriendlyMessage);
     },
@@ -1468,16 +1319,6 @@ export const ChatComponent: React.FC<ChatComponentProps> = ({
       return;
     }
 
-    // Validate API key before sending
-    const apiKey = plugin.getApiKey()?.trim();
-    if (!apiKey || apiKey.length === 0) {
-      new Notice(
-        "API key is missing. Please set your API key in plugin settings.",
-        5000
-      );
-      return;
-    }
-
     const files =
       attachments.length > 0
         ? attachments.map(attachment => ({
@@ -1537,12 +1378,7 @@ export const ChatComponent: React.FC<ChatComponentProps> = ({
     }
   }, [isChatTabActive]);
 
-  const [maxContextSize] = useState(80 * 1000); // Keep this one
-
-  useEffect(() => {
-    // Update selectedModel when plugin settings change
-    setSelectedModel(plugin.settings.selectedModel);
-  }, [plugin.settings.selectedModel]);
+  const maxContextSize = Math.max(2048, (plugin.settings.localContextSize || 4096) * 3);
 
   const handleTranscriptionComplete = (text: string) => {
     setInput(text);
@@ -1663,9 +1499,8 @@ export const ChatComponent: React.FC<ChatComponentProps> = ({
       // Stage the exact body we want reload to use
       forcedReloadBodyRef.current = {
         currentDatetime: getCurrentDatetime(),
-        model: plugin.settings.selectedModel,
-        newUnifiedContext: snapshot, // ✅ the important part
-        enableChatWebSearch: plugin.settings.enableChatWebSearch,
+        model: plugin.settings.localModelId,
+        newUnifiedContext: snapshot,
         ...(plugin.settings.chatMaxStepsPreference !== "auto"
           ? { requestedMaxSteps: plugin.settings.chatMaxStepsPreference }
           : {}),
@@ -1683,8 +1518,10 @@ export const ChatComponent: React.FC<ChatComponentProps> = ({
       messages,
       messagesWithTimestamps,
       setMessages,
-      selectedModel,
       plugin.settings,
+      activeChatId,
+      chatHistoryManager,
+      fullContext,
     ]
   );
 
@@ -2090,12 +1927,8 @@ export const ChatComponent: React.FC<ChatComponentProps> = ({
                 unifiedContext={contextString}
                 maxContextSize={maxContextSize}
               />
-              {/* Web search is enabled server-side by default */}
             </div>
-            <ModelSelector
-              selectedModel={selectedModel}
-              onModelSelect={setSelectedModel}
-            />
+            <ModelSelector />
           </div>
         </form>
       </div>

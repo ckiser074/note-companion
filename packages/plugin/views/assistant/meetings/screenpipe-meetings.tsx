@@ -26,8 +26,6 @@ import {
   type MeetingSession,
   type ScreenpipeItem,
 } from "./screenpipe-meetings-utils";
-import { getApiError, readResponseJson, type ApiErrorBody } from "../../../lib/api-json";
-import { obsidianFetch } from "../../../lib/obsidian-fetch";
 
 interface ScreenpipeMeetingsProps {
   plugin: FileOrganizer;
@@ -342,40 +340,20 @@ export const ScreenpipeMeetings: React.FC<ScreenpipeMeetingsProps> = ({
       ""
     );
 
-    const response = await obsidianFetch(
-      `${plugin.getServerUrl()}/api/enhance-meeting-note`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${plugin.settings.API_KEY}`,
+    let enhancedContent = await plugin.localAI.streamGenerate(
+      [
+        {
+          role: "system",
+          content:
+            "You are an expert meeting note assistant. Combine the user's existing note (if any) and the meeting transcript into a well-structured Obsidian Markdown note with sections: ## Summary, ## Discussion Points, ## Action Items (as - [ ] tasks), and ## Full Transcript. Preserve user notes cleanly. Output ONLY Markdown.",
         },
-        body: JSON.stringify({
-          transcript,
-          currentNoteContent: cleanedNoteContent,
-          fileName: activeFile.basename,
-          recordingDate,
-          recordingFileName,
-          recordingFilePath: "",
-        }),
-      }
+        {
+          role: "user",
+          content: `Note title: ${activeFile.basename}\nDate: ${recordingDate ?? "Unknown"}\nSession: ${recordingFileName}\n\nExisting Note Content:\n"""\n${cleanedNoteContent.slice(0, 3000)}\n"""\n\nMeeting Transcript:\n"""\n${transcript.slice(0, 6000)}\n"""`,
+        },
+      ],
+      { temperature: 0.1, maxTokens: 1536, suppressThinking: true }
     );
-
-    if (!response.ok) {
-      const errorData = await readResponseJson<ApiErrorBody>(response);
-      throw new Error(getApiError(errorData) ?? "Enhancement failed");
-    }
-
-    const reader = response.body?.getReader();
-    const decoder = new TextDecoder();
-    let enhancedContent = "";
-    if (!reader) throw new Error("No response body");
-    let streamDone = false;
-    while (!streamDone) {
-      const { done, value } = await reader.read();
-      streamDone = done;
-      if (!done && value) enhancedContent += decoder.decode(value, { stream: true });
-    }
 
     enhancedContent = enhancedContent.replace(
       /^Recording[s]?:.*?\n\n---\n\n/s,

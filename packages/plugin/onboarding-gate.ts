@@ -1,19 +1,14 @@
 import type { FileOrganizerSettings } from "./settings";
 
 /**
- * The wizard opens by itself only for a brand-new install: no license key,
- * not self-hosting, and it has never been shown or completed.
+ * The wizard opens by itself only for a brand-new install that has never
+ * shown or completed onboarding.
  */
 export function shouldAutoOpenOnboarding(
   settings: Pick<
     FileOrganizerSettings,
-    "hasRunOnboarding" | "hasShownOnboarding" | "API_KEY" | "enableSelfHosting"
+    "hasRunOnboarding" | "hasShownOnboarding"
   >
 ): boolean {
-  return !(
-    settings.hasRunOnboarding ||
-    settings.hasShownOnboarding ||
-    settings.API_KEY ||
-    settings.enableSelfHosting
-  );
+  return !(settings.hasRunOnboarding || settings.hasShownOnboarding);
 }

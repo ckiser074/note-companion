@@ -1,9 +1,26 @@
 import type { InboxNotificationLevel } from "./inbox/notification-level";
+import {
+  DEFAULT_LOCAL_MODEL_FILENAME,
+  DEFAULT_LOCAL_MODEL_ID,
+  DEFAULT_LOCAL_MODEL_URL,
+} from "./ai/model-downloader";
+
+function getDefaultCpuThreads(): number {
+  const hw =
+    typeof navigator !== "undefined" && navigator.hardwareConcurrency
+      ? navigator.hardwareConcurrency
+      : 4;
+  return Math.max(1, Math.min(8, Math.floor(hw / 2)));
+}
 
 export class FileOrganizerSettings {
+  // Local embedded WASM inference settings
+  localModelId = DEFAULT_LOCAL_MODEL_ID;
+  localModelFileName = DEFAULT_LOCAL_MODEL_FILENAME;
+  localModelUrl = DEFAULT_LOCAL_MODEL_URL;
+  localCpuThreads = getDefaultCpuThreads();
+  localContextSize = 4096;
 
-  API_KEY = "";
-  isLicenseValid = false;
   useLogs = true;
   defaultDestinationPath = "_NoteCompanion/Processed";
   referencePath = "_NoteCompanion/References";
@@ -14,7 +31,6 @@ export class FileOrganizerSettings {
   templatePaths = "_NoteCompanion/Templates";
   bypassedFilePath = "_NoteCompanion/Bypassed";
   errorFilePath = "_NoteCompanion/Errors";
-  syncFolderPath = "_NoteCompanion/Sync";
   recordingsFolderPath = "Recordings";
 
   // inbox settings
@@ -22,20 +38,20 @@ export class FileOrganizerSettings {
   enableDocumentClassification = false;
   /** Template applied to inbox audio instead of AI classification ("none" = off). */
   audioDefaultTemplate = "none";
-  /** Save recorder output into the inbox so it is transcribed and formatted automatically. */
+  /** Save recorder output into the inbox. */
   sendRecordingsToInbox = false;
-  /** Template used to also create a study note (e.g. flash_cards) from each transcribed recording ("none" = off). */
+  /** Template used to also create a study note (e.g. flash_cards) ("none" = off). */
   studyNoteTemplate = "none";
-  // not working atm
   enableFileRenaming = true;
   enableAttachmentProcessing = true;
-  enableImageDescription = true;
-  enableAudioTranscription = true;
+  /** Cloud-only vision OCR is disabled in 100% offline text-only mode. */
+  enableImageDescription = false;
+  /** Cloud-only audio transcription is disabled in 100% offline text-only mode. */
+  enableAudioTranscription = false;
   enablePdfTextExtraction = true;
   enableYouTubeTranscriptFetching = true;
   enableFolderRecommendation = true;
   enableBackupCreation = true;
-  enableChatWebSearch = true;
 
   renameInstructions =
     "If document has a human readable name, use it. Otherwise, create a concise, descriptive name for the document based on its key content. Prioritize clarity and searchability, using specific terms that will make the document easy to find later. Avoid generic words and focus on unique, identifying elements.";
@@ -44,15 +60,10 @@ export class FileOrganizerSettings {
   enableAtomicNotes = false;
   ignoreFolders = [""];
   stagingFolder = ".notecompanion/staging";
-  enableSelfHosting = false;
-  selfHostingURL = "http://localhost:3010";
 
   useFolderEmbeddings = false;
   useVaultTitles = true;
-  showLocalLLMInChat = false;
   customFolderInstructions = "";
-  selectedModel: "gpt-4o-mini" | "llama3.2" = "gpt-4o-mini";
-  customModelName = "llama3.2";
   tagScoreThreshold = 70;
   formatBehavior: "override" | "newFile" | "append" = "override";
   useInbox = true;
@@ -62,12 +73,8 @@ export class FileOrganizerSettings {
     "For handwriting and whiteboards, preserve line breaks and list structure.";
   debugMode = false;
   enableTitleSuggestions = false;
-  /**
-   * Chat tool rounds (maxSteps hint to API). Server clamps by subscription tier and context size.
-   * 'auto' = omit request field; use server tier default (free 3, paid 5).
-   */
-  chatMaxStepsPreference: 'auto' | 3 | 5 = 'auto';
-  // use for sampling of the recommend fucntions
+  chatMaxStepsPreference: "auto" | 3 | 5 = "auto";
+  // use for sampling of the recommend functions
   contentCutoffChars = 1000;
   // use to prevent formatting of big file
   maxFormattingTokens = 100 * 1000;
@@ -75,7 +82,6 @@ export class FileOrganizerSettings {
   maxChatTokens = 100 * 1000;
   customTagInstructions =
     "Generate tags that capture the main topics, themes, and type of content in the document. Focus on specific, meaningful tags that will help with organization and retrieval.";
-  hasCatalystAccess = null;
   hasRunOnboarding = false;
   /** Set once the onboarding wizard has been auto-opened, so it is never forced on the user twice. */
   hasShownOnboarding = false;
@@ -83,12 +89,10 @@ export class FileOrganizerSettings {
   /** @deprecated Use inboxNotificationLevel. Kept for settings migration only. */
   enableProcessingNotifications = true;
   inboxNotificationLevel: InboxNotificationLevel = "warning";
-  showSyncTab = false; // Show Sync tab in assistant (experimental mobile sync feature)
-  enableScreenpipe = false; // Enable ScreenPipe integration for screen activity search
+  enableScreenpipe = false; // Enable ScreenPipe integration for screen activity search (localhost:3030)
   screenpipeApiUrl = "http://localhost:3030"; // ScreenPipe API URL
   screenpipeTimeRange = 4; // Default time range in hours for ScreenPipe searches (1-24)
   queryScreenpipeLimit = 10; // Default query limit for ScreenPipe searches (1-100)
-  downloadedSyncFileIds: string[] = [];
 }
 
 export const DEFAULT_SETTINGS = new FileOrganizerSettings();

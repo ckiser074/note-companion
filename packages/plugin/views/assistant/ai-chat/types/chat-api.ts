@@ -14,7 +14,6 @@ export interface ChatRequestBody {
   newUnifiedContext: string;
   model: string;
   requestedMaxSteps?: number;
-  enableChatWebSearch?: boolean;
 }
 
 export interface YouTubeVideoSummary {
@@ -189,7 +188,7 @@ export function shouldDeferAssistantContent(params: {
     if (hasPendingTools && text.length > 0) return true;
   }
 
-  return true;
+  return text.length === 0;
 }
 
 export function toToolInvocation(

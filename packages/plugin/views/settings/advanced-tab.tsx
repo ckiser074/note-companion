@@ -8,12 +8,6 @@ interface AdvancedTabProps {
 }
 
 export const AdvancedTab: React.FC<AdvancedTabProps> = ({ plugin }) => {
-  const [enableSelfHosting, setEnableSelfHosting] = useState(
-    plugin.settings.enableSelfHosting
-  );
-  const [selfHostingURL, setSelfHostingURL] = useState(
-    plugin.settings.selfHostingURL
-  );
   const [useLogs, setUseLogs] = useState(plugin.settings.useLogs);
   const [debugMode, setDebugMode] = useState(plugin.settings.debugMode);
   const [showLogs, setShowLogs] = useState(false);
@@ -30,30 +24,10 @@ export const AdvancedTab: React.FC<AdvancedTabProps> = ({ plugin }) => {
     plugin.settings.enableBackupCreation
   );
 
-  // Sync state with plugin settings when they change
   useEffect(() => {
     setUseLogs(plugin.settings.useLogs);
     setDebugMode(plugin.settings.debugMode);
-    setEnableSelfHosting(plugin.settings.enableSelfHosting);
-    setSelfHostingURL(plugin.settings.selfHostingURL);
-  }, [
-    plugin.settings.useLogs,
-    plugin.settings.debugMode,
-    plugin.settings.enableSelfHosting,
-    plugin.settings.selfHostingURL,
-  ]);
-
-  const handleToggleChange = async (value: boolean) => {
-    setEnableSelfHosting(value);
-    plugin.settings.enableSelfHosting = value;
-    await plugin.saveSettings();
-  };
-
-  const handleURLChange = async (value: string) => {
-    setSelfHostingURL(value);
-    plugin.settings.selfHostingURL = value;
-    await plugin.saveSettings();
-  };
+  }, [plugin.settings.useLogs, plugin.settings.debugMode]);
 
   return (
     <div className="p-4 space-y-4">
@@ -61,7 +35,7 @@ export const AdvancedTab: React.FC<AdvancedTabProps> = ({ plugin }) => {
         name="Create Backup Before Formatting"
         description="When enabled, a backup copy is created before AI formatting. Applies to inbox, template, and chat formatting."
         value={enableBackupCreation}
-        onChange={value => {
+        onChange={(value) => {
           setEnableBackupCreation(value);
           plugin.settings.enableBackupCreation = value;
           void plugin.saveSettings();
@@ -70,9 +44,9 @@ export const AdvancedTab: React.FC<AdvancedTabProps> = ({ plugin }) => {
 
       <ToggleSetting
         name="Note Companion File Logs"
-        description="Allows you to keep track of the changes made by file Organizer."
+        description="Allows you to keep track of the changes made by File Organizer."
         value={useLogs}
-        onChange={value => {
+        onChange={(value) => {
           setUseLogs(value);
           plugin.settings.useLogs = value;
           void plugin.saveSettings();
@@ -83,47 +57,13 @@ export const AdvancedTab: React.FC<AdvancedTabProps> = ({ plugin }) => {
         name="Debug Mode"
         description="Enable detailed logging for troubleshooting. This may impact performance."
         value={debugMode}
-        onChange={value => {
+        onChange={(value) => {
           setDebugMode(value);
           logger.configure(value);
           plugin.settings.debugMode = value;
           void plugin.saveSettings();
         }}
       />
-
-      <div className="setting-item">
-        <div className="setting-item-info">
-          <div className="setting-item-name">Enable Self-Hosting</div>
-          <div className="setting-item-description">
-            Enable Self-Hosting to host the server on your own machine. Requires
-            technical skills and an external OpenAI API Key + credits. ⛔️ Keep
-            disabled if you have a cloud subscription.
-          </div>
-        </div>
-        <div className="setting-item-control">
-          <input
-            type="checkbox"
-            checked={enableSelfHosting}
-            onChange={e => { void handleToggleChange(e.target.checked); }}
-          />
-        </div>
-      </div>
-
-      {enableSelfHosting && (
-        <div className="setting-item">
-          <div className="setting-item-info">
-            <div className="setting-item-name">Server URL</div>
-          </div>
-          <div className="setting-item-control">
-            <input
-              type="text"
-              placeholder="Enter your Server URL"
-              value={selfHostingURL}
-              onChange={e => { void handleURLChange(e.target.value); }}
-            />
-          </div>
-        </div>
-      )}
 
       {useLogs && (
         <div className="space-y-2 border-t border-[--background-modifier-border] pt-4 mt-4">
@@ -138,29 +78,31 @@ export const AdvancedTab: React.FC<AdvancedTabProps> = ({ plugin }) => {
               {logger.getLogs().length > 0 && (
                 <>
                   <button
-                    onClick={() => { void (async () => {
-                      const logs = logger.getLogs();
-                      const logText = logs
-                        .map(
-                          log =>
-                            `[${new Date(
-                              log.timestamp
-                            ).toLocaleString()}] [${log.level.toUpperCase()}] ${
-                              log.message
-                            }${log.details ? `\n${log.details}` : ""}`
-                        )
-                        .join("\n\n");
-                      try {
-                        await navigator.clipboard.writeText(logText);
-                        new Notice(
-                          `Copied ${logs.length} log entries to clipboard`,
-                          2000
-                        );
-                      } catch (error) {
-                        console.error("Failed to copy logs:", error);
-                        new Notice("Failed to copy logs to clipboard", 3000);
-                      }
-                    })(); }}
+                    onClick={() => {
+                      void (async () => {
+                        const logs = logger.getLogs();
+                        const logText = logs
+                          .map(
+                            (log) =>
+                              `[${new Date(
+                                log.timestamp
+                              ).toLocaleString()}] [${log.level.toUpperCase()}] ${
+                                log.message
+                              }${log.details ? `\n${log.details}` : ""}`
+                          )
+                          .join("\n\n");
+                        try {
+                          await navigator.clipboard.writeText(logText);
+                          new Notice(
+                            `Copied ${logs.length} log entries to clipboard`,
+                            2000
+                          );
+                        } catch (error) {
+                          console.error("Failed to copy logs:", error);
+                          new Notice("Failed to copy logs to clipboard", 3000);
+                        }
+                      })();
+                    }}
                     className="clickable-icon"
                     aria-label="Copy all logs"
                     title="Copy all logs to clipboard"
@@ -266,8 +208,8 @@ export const AdvancedTab: React.FC<AdvancedTabProps> = ({ plugin }) => {
           <div className="setting-item-name">Content Analysis Cutoff</div>
           <div className="setting-item-description">
             Maximum number of characters to analyze for folder suggestions,
-            tagging, and titles. Lower values improve performance and reduce API
-            costs. Default: 1000
+            tagging, and titles. Lower values speed up local CPU inference.
+            Default: 1000
           </div>
         </div>
         <div className="setting-item-control">
@@ -276,8 +218,8 @@ export const AdvancedTab: React.FC<AdvancedTabProps> = ({ plugin }) => {
             min="100"
             max="10000"
             value={contentCutoffChars}
-            onChange={e => {
-              const value = parseInt(e.target.value);
+            onChange={(e) => {
+              const value = parseInt(e.target.value, 10);
               setContentCutoffChars(value);
               plugin.settings.contentCutoffChars = value;
               void plugin.saveSettings();
@@ -303,8 +245,8 @@ export const AdvancedTab: React.FC<AdvancedTabProps> = ({ plugin }) => {
             max="500000"
             step="1000"
             value={maxFormattingTokens}
-            onChange={e => {
-              const value = parseInt(e.target.value);
+            onChange={(e) => {
+              const value = parseInt(e.target.value, 10);
               setMaxFormattingTokens(value);
               plugin.settings.maxFormattingTokens = value;
               void plugin.saveSettings();
@@ -327,7 +269,7 @@ export const AdvancedTab: React.FC<AdvancedTabProps> = ({ plugin }) => {
             min="1"
             max="500"
             value={pdfPageLimit}
-            onChange={e => {
+            onChange={(e) => {
               const value = parseInt(e.target.value, 10);
               setPdfPageLimit(value);
               plugin.settings.pdfPageLimit = value;
@@ -363,7 +305,7 @@ const ToggleSetting: React.FC<ToggleSettingProps> = ({
       <input
         type="checkbox"
         checked={value}
-        onChange={e => onChange(e.target.checked)}
+        onChange={(e) => onChange(e.target.checked)}
         className="form-checkbox text-[--interactive-accent]"
       />
     </div>

@@ -12,7 +12,6 @@ import { ClassificationContainer } from "./ai-format/templates";
 import { TranscriptionButton } from "./transcript";
 import { EmptyState } from "./components/empty-state";
 import { logMessage } from "../../../someUtils";
-import { LicenseValidator } from "./components/license-validator";
 import { VALID_MEDIA_EXTENSIONS } from "../../../constants";
 import { logger } from "../../../services/logger";
 import { tw } from "../../../lib/utils";
@@ -65,7 +64,6 @@ export const AssistantView: React.FC<AssistantViewProps> = ({
   const [noteContent, setNoteContent] = React.useState<string>("");
   const [refreshKey, setRefreshKey] = React.useState<number>(0);
   const [error, setError] = React.useState<string | null>(null);
-  const [isLicenseValid, setIsLicenseValid] = React.useState(false);
 
   // Use refs to track the active file and path for rename detection
   const activeFilePathRef = React.useRef<string | null>(null);
@@ -243,27 +241,6 @@ export const AssistantView: React.FC<AssistantViewProps> = ({
     }
   }, [activeFile, plugin.app.vault]);
 
-  // Then check license
-  if (!isLicenseValid) {
-    return (
-      <div className={tw("flex flex-col h-full")}>
-        <div
-          className={tw(
-            "flex gap-2 items-center px-3 py-2 border-b border-[--background-modifier-border]"
-          )}
-        >
-          <RefreshButton onRefresh={refreshContext} />
-        </div>
-        <div className={tw("px-3")}>
-          <LicenseValidator
-            apiKey={plugin.settings.API_KEY}
-            onValidationComplete={() => setIsLicenseValid(true)}
-            plugin={plugin}
-          />
-        </div>
-      </div>
-    );
-  }
 
   if (error) {
     return (

@@ -19,7 +19,7 @@ function setup(opts: { content?: string; existing?: string[]; instructions?: str
   const source = { path: "Lectures/Immunity.md", basename: "Immunity", parent: { path: "Lectures" } };
   const formatStream = jest.fn(async () => opts.generated ?? CARDS);
   const plugin = {
-    settings: { maxFormattingTokens: 100000, API_KEY: "k" },
+    settings: { maxFormattingTokens: 100000 },
     app: {
       vault: {
         read: async (f: { path: string }) => files.get(f.path),
@@ -34,7 +34,6 @@ function setup(opts: { content?: string; existing?: string[]; instructions?: str
       },
     },
     getTemplateInstructions: jest.fn(async () => opts.instructions ?? "make cards"),
-    getServerUrl: () => "https://server",
     formatStream,
     cleanupTagsInContent: (c: string) => c,
   };
