@@ -1,5 +1,6 @@
 import { Notice } from "obsidian";
 import * as fs from "fs";
+import * as path from "path";
 import type FileOrganizer from "../index";
 import {
   ModelDownloader,
@@ -285,13 +286,30 @@ export class LocalAIService {
   private ensureWorker(): Worker {
     if (this.worker) return this.worker;
 
-    const workerBlob = new Blob([__AI_WORKER_CODE__], {
-      type: "text/javascript",
-    });
-    this.workerBlobUrl = URL.createObjectURL(workerBlob);
-    const worker = new Worker(this.workerBlobUrl, {
-      name: "note-companion-wllama",
-    });
+    const workerPath = path.join(
+      this.downloader.getPluginDir(),
+      "ai-worker.js"
+    );
+    if (!fs.existsSync(workerPath)) {
+      throw new Error(
+        `Missing local AI worker at ${workerPath}. Rebuild or reinstall the plugin.`
+      );
+    }
+
+    const workerCode = fs.readFileSync(workerPath, "utf8");
+    const workerBlobUrl = URL.createObjectURL(
+      new Blob([workerCode], { type: "application/javascript" })
+    );
+    let worker: Worker;
+    try {
+      worker = new window.Worker(workerBlobUrl, {
+        name: "para-companion-wllama",
+      });
+    } catch (error) {
+      URL.revokeObjectURL(workerBlobUrl);
+      throw error;
+    }
+    this.workerBlobUrl = workerBlobUrl;
 
     worker.onmessage = (event: MessageEvent<WorkerOutMessage>) => {
       this.handleWorkerMessage(event.data);

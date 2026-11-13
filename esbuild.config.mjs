@@ -47,11 +47,11 @@ const reactAliases = {
 	"react/jsx-dev-runtime": path.join(reactDir, "jsx-dev-runtime.js"),
 };
 
-async function buildAiWorkerCode() {
-	const result = await esbuild.build({
+async function buildAiWorkerFile() {
+	await esbuild.build({
 		entryPoints: [path.join(pluginDir, "workers/ai-worker.ts")],
 		bundle: true,
-		write: false,
+		outfile: path.join(outdir, "ai-worker.js"),
 		platform: "browser",
 		format: "iife",
 		target: "es2022",
@@ -60,10 +60,9 @@ async function buildAiWorkerCode() {
 		treeShaking: true,
 		tsconfig: path.join(pluginDir, "tsconfig.json"),
 	});
-	return result.outputFiles[0].text;
 }
 
-const aiWorkerCode = await buildAiWorkerCode();
+await buildAiWorkerFile();
 
 const cssPostProcessPlugin = {
 	name: "css-post-process",
@@ -143,7 +142,6 @@ const context = await esbuild.context({
 	define: {
 		'process.env.NODE_ENV': prod ? '"production"' : '"development"',
 		'process.env.GITHUB_ACTIONS': JSON.stringify(process.env.GITHUB_ACTIONS || "false"),
-		'__AI_WORKER_CODE__': JSON.stringify(aiWorkerCode),
 	},
 	loader: {
 		'.ts': 'ts',
