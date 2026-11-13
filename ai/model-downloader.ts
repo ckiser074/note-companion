@@ -27,7 +27,8 @@ export class ModelDownloader {
 
   constructor(
     private app: App,
-    private pluginId: string
+    private pluginId: string,
+    private pluginDir?: string
   ) {}
 
   getPluginDir(): string {
@@ -36,6 +37,9 @@ export class ModelDownloader {
       throw new Error(
         "Local AI inference requires Obsidian Desktop with local filesystem access."
       );
+    }
+    if (this.pluginDir) {
+      return path.resolve(adapter.getBasePath(), this.pluginDir);
     }
     return path.join(
       adapter.getBasePath(),

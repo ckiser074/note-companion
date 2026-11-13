@@ -47,7 +47,11 @@ export class LocalAIService {
   private requestCounter = 0;
 
   constructor(private plugin: FileOrganizer) {
-    this.downloader = new ModelDownloader(plugin.app, plugin.manifest.id);
+    this.downloader = new ModelDownloader(
+      plugin.app,
+      plugin.manifest.id,
+      plugin.manifest.dir
+    );
     this.refreshFileStatus();
   }
 

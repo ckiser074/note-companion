@@ -23,9 +23,10 @@ npm install
 npm run build
 ```
 
-The build produces `main.js`, `styles.css`, and `wasm/wllama.wasm` in the
-repository root. Copy those files and `manifest.json` into
-`.obsidian/plugins/para-companion/` in your vault, then enable PARA Companion in
+Running `npm run build` generates a ready-to-copy `extension/` folder containing
+the compiled plugin, manifest, styles, and required WASM asset. Copy the
+contents of `extension/` into
+`<My-Vault>/.obsidian/plugins/para-companion/`, then enable PARA Companion in
 Obsidian.
 
 Run the test suite with `npm test`.

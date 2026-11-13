@@ -18,7 +18,11 @@ const prod = process.argv[2] === "production";
 const pluginDir = path.dirname(fileURLToPath(import.meta.url));
 process.chdir(pluginDir);
 
-const outdir = pluginDir;
+const outdir = path.join(pluginDir, "extension");
+if (prod && fs.existsSync(outdir)) {
+	fs.rmSync(outdir, { recursive: true, force: true });
+}
+fs.mkdirSync(outdir, { recursive: true });
 
 function copyWllamaWasm(outputDir) {
 	const wllamaPkgDir = path.dirname(
@@ -64,18 +68,26 @@ const aiWorkerCode = await buildAiWorkerCode();
 const cssPostProcessPlugin = {
 	name: "css-post-process",
 	setup(build) {
-		build.onEnd(() => postProcessCss(outdir));
+		build.onEnd((result) => {
+			if (result.errors.length === 0) {
+				postProcessCss(outdir);
+			}
+		});
 	},
 };
 
 function postProcessCss(outputDir) {
 	const resolvedDir = path.resolve(outputDir);
-	normalizeCssHexInDirectory(resolvedDir);
+	const mainCssPath = path.join(resolvedDir, "main.css");
 	const stylesPath = path.join(resolvedDir, "styles.css");
-	const mainPath = path.join(resolvedDir, "main.css");
-	if (fs.existsSync(stylesPath)) {
-		fs.copyFileSync(stylesPath, mainPath);
+	if (fs.existsSync(mainCssPath)) {
+		fs.renameSync(mainCssPath, stylesPath);
 	}
+	normalizeCssHexInDirectory(resolvedDir);
+	fs.copyFileSync(
+		path.join(pluginDir, "manifest.json"),
+		path.join(resolvedDir, "manifest.json")
+	);
 	copyWllamaWasm(resolvedDir);
 }
 
@@ -85,7 +97,6 @@ const context = await esbuild.context({
 	},
 	entryPoints: {
 		main: path.join(pluginDir, "index.ts"),
-		styles: path.join(pluginDir, "plugin-styles.css"),
 	},
 	bundle: true,
 	external: [
