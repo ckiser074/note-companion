@@ -1,40 +1,26 @@
 {
   "compilerOptions": {
     "target": "ES2018",
-    "module": "commonjs",
+    "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "jsx": "react-jsx",
-    "composite": true,
-    "declaration": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "allowSyntheticDefaultImports": true,
     "baseUrl": ".",
     "paths": {
-      "@file-organizer/*": [
-        "packages/*/src"
-      ],
-      "@/*": [
-        "packages/web/*"
-      ]
-    }
+      "@/*": ["*"],
+      "@/components/*": ["components/*"],
+      "react": ["./node_modules/@types/react/index.d.ts"],
+      "react-dom": ["./node_modules/@types/react-dom/index.d.ts"],
+      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime.d.ts"]
+    },
+    "lib": ["ES2018", "DOM"]
   },
-  "references": [
-    {
-      "path": "packages/shared"
-    },
-    {
-      "path": "packages/plugin"
-    },
-    {
-      "path": "packages/web"
-    },
-    {
-      "path": "packages/mobile"
-    }
-  ],
-  "exclude": [
-    "node_modules"
-  ]
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
 }
